@@ -1653,10 +1653,34 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
 ;;; Log insert status
 
 (defun majutsu-log--wash-status (_args)
-  "Keep `jj status` output as-is in the current section."
-  (goto-char (point-max)))
+  "Parse `jj status` output and create `jj-file` sections for changed files."
+  (let ((end (point-max)))
+    (save-excursion
+      (when (re-search-forward "^Working copy changes:\n" end t)
+        (let ((regions '()))
+          ;; First pass: collect file line positions
+          (while (and (< (point) end)
+                      (not (looking-at-p "^\\s-*$"))
+                      (not (looking-at-p "^\\(?:Working copy\\|Parent commit\\|Conflicts\\)")))
+            (when (looking-at "^\\([MAD?]\\)\\s-+\\(.+\\)$")
+              (push (list (line-beginning-position)
+                          (save-excursion (forward-line 1) (point))
+                          (match-string-no-properties 2))
+                    regions))
+            (forward-line 1))
+          ;; Second pass: replace file lines with jj-file sections (bottom to top)
+          (dolist (region regions)
+            (let* ((beg (nth 0 region))
+                   (after-line (nth 1 region))
+                   (file (nth 2 region)))
+              (goto-char beg)
+              (let ((line (buffer-substring-no-properties
+                           (line-beginning-position) (line-end-position))))
+                (delete-region beg after-line)
+                (magit-insert-section (jj-file file)
+                  (magit-insert-heading line)
+                  (insert "\n"))))))))))
 
-;; TODO: Enhance status output parsing to create sections per file and conflicts.
 (defun majutsu-log-insert-status ()
   "Insert jj status into current buffer."
   (magit-insert-section (status)

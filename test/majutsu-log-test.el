@@ -869,4 +869,115 @@
     (should-not (get-text-property 0 'font-lock-face strip))
     (should (eq (get-text-property 0 'font-lock-face override) 'warning))))
 
+;; Status washer tests
+
+(ert-deftest majutsu-log--wash-status-single-file ()
+  "A single changed file creates one jj-file section."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point)))
+        (insert "Working copy changes:\nM path/to/file.el\nWorking copy  (@) : abc123\n")
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (goto-char (point-min))
+      (search-forward "M path/to/file.el")
+      (let ((section (magit-section-at (point))))
+        (should section)
+        (should (eq (oref section type) 'jj-file))
+        (should (equal (oref section value) "path/to/file.el"))))))
+
+(ert-deftest majutsu-log--wash-status-multiple-files ()
+  "Multiple changed files create multiple jj-file sections in order."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point)))
+        (insert "Working copy changes:\nM file1\nA file2\nD file3\n? file4\nWorking copy  (@) : abc123\n")
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (let (sections)
+        (dolist (file '("file1" "file2" "file3" "file4"))
+          (goto-char (point-min))
+          (search-forward file)
+          (let ((section (magit-section-at (point))))
+            (should section)
+            (should (eq (oref section type) 'jj-file))
+            (push (oref section value) sections)))
+        (setq sections (nreverse sections))
+        (should (equal sections '("file1" "file2" "file3" "file4")))))))
+
+(ert-deftest majutsu-log--wash-status-preserves-summary ()
+  "Commit summary lines are preserved as plain text."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point)))
+        (insert "Working copy changes:\nM file1\nWorking copy  (@) : abc123\nParent commit (@-): def456\n")
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (goto-char (point-min))
+      (should (search-forward "Working copy  (@) : abc123" nil t))
+      (should (search-forward "Parent commit (@-): def456" nil t)))))
+
+(ert-deftest majutsu-log--wash-status-no-changes ()
+  "No changes output does not create jj-file sections."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point)))
+        (insert "The working copy has no changes.\nWorking copy  (@) : abc123\nParent commit (@-): def456\n")
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (goto-char (point-min))
+      (let ((has-jj-file nil))
+        (while (not (eobp))
+          (when-let ((section (magit-section-at (point))))
+            (when (eq (oref section type) 'jj-file)
+              (setq has-jj-file t)))
+          (forward-line 1))
+        (should-not has-jj-file)))))
+
+(ert-deftest majutsu-log--wash-status-spaces-in-path ()
+  "File paths containing spaces are handled correctly."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point)))
+        (insert "Working copy changes:\nM path/with spaces/file.txt\nWorking copy  (@) : abc123\n")
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (goto-char (point-min))
+      (search-forward "M path/with spaces/file.txt")
+      (let ((section (magit-section-at (point))))
+        (should section)
+        (should (eq (oref section type) 'jj-file))
+        (should (equal (oref section value) "path/with spaces/file.txt"))))))
+
+(ert-deftest majutsu-log--wash-status-unparseable-fallback ()
+  "Unparseable output is displayed as raw text."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point))
+            (raw "Some unexpected output\nwithout a changes header\n"))
+        (insert raw)
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (goto-char (point-min))
+      (should (search-forward "Some unexpected output" nil t))
+      (should (search-forward "without a changes header" nil t)))))
+
 ;;; majutsu-log-test.el ends here
