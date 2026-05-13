@@ -73,6 +73,7 @@ In diff buffer on a file section, restore only that file."
   (interactive (list (transient-args 'majutsu-restore)))
   (let* ((selection-buf (majutsu-interactive--selection-buffer))
          (patch (majutsu-interactive-build-patch-if-selected selection-buf t t))
+         (args (majutsu--normalize-fileset-args args))
          (args (if patch
                    (seq-remove (lambda (arg)
                                  (or (string= arg "--interactive")

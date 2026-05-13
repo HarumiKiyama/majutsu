@@ -156,6 +156,22 @@ is appended."
         (cons flag args)
       (append args (list flag)))))
 
+(defun majutsu--normalize-fileset-args (args)
+  "Return ARGS with structured fileset arguments placed after `--'.
+Transient file arguments are represented as a cons whose car is
+\"--\" and whose cdr is the selected filesets.  Normalize that
+structure before process helpers flatten ARGS, otherwise later options
+can be passed after `--` and parsed by jj as filesets."
+  (let (normal files)
+    (dolist (arg args)
+      (if (and (consp arg)
+               (equal (car arg) "--"))
+          (setq files (append files (cdr arg)))
+        (setq normal (append normal (list arg)))))
+    (append normal
+            (when files
+              (cons "--" files)))))
+
 (defun majutsu--debug (format-string &rest args)
   "Log debug message if `majutsu-debug' is enabled."
   (when majutsu-debug

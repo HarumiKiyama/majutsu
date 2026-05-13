@@ -29,6 +29,18 @@
          (expected "file:\"a\\\"b\\\\c\\n\""))
     (should (equal (majutsu-jj-fileset-quote input) expected))))
 
+(ert-deftest majutsu--normalize-fileset-args/moves-options-before-delimiter ()
+  "Options after structured fileset values should move before `--'."
+  (should (equal (majutsu--normalize-fileset-args
+                  '("--from=@" ("--" "src/a.el" "src/b.el") "--into=main"))
+                 '("--from=@" "--into=main" "--" "src/a.el" "src/b.el"))))
+
+(ert-deftest majutsu--normalize-fileset-args/preserves-option-like-filesets ()
+  "Fileset values that look like options should stay after `--'."
+  (should (equal (majutsu--normalize-fileset-args
+                  '(("--" "--literal-file") "--from=@"))
+                 '("--from=@" "--" "--literal-file"))))
+
 ;; Tests for majutsu-jj-string (new behavior - returns first line only)
 
 (ert-deftest majutsu-jj-string/returns-first-line ()

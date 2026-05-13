@@ -43,6 +43,7 @@
          ;; Generate patch for SELECTED content (invert=nil)
          ;; This is what goes into the first commit
          (patch (majutsu-interactive-build-patch-if-selected selection-buf nil nil))
+         (args (majutsu--normalize-fileset-args args))
          (args (if patch
                    (seq-remove (lambda (arg)
                                  (or (string= arg "--interactive")

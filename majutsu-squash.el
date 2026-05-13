@@ -31,9 +31,10 @@
 If inside the transient, return transient args.
 Otherwise, if no --revision/--from/--into is set and point is on
 a jj-commit section, add --revision from that section."
-  (let ((args (if (eq transient-current-command 'majutsu-squash)
-                  (transient-args 'majutsu-squash)
-                '())))
+  (let ((args (majutsu--normalize-fileset-args
+               (if (eq transient-current-command 'majutsu-squash)
+                   (transient-args 'majutsu-squash)
+                 '()))))
     (unless (cl-some (lambda (arg)
                        (or (string-prefix-p "--revision=" arg)
                            (string-prefix-p "--from=" arg)
@@ -56,7 +57,8 @@ a jj-commit section, add --revision from that section."
   (let* ((selection-buf (majutsu-interactive--selection-buffer))
          ;; Generate patch for SELECTED content (invert=nil)
          ;; This is what gets squashed into parent
-         (patch (majutsu-interactive-build-patch-if-selected selection-buf nil nil)))
+         (patch (majutsu-interactive-build-patch-if-selected selection-buf nil nil))
+         (args (majutsu--normalize-fileset-args args)))
     (if patch
         (progn
           ;; reverse=t means reset $right to $left, then apply patch forward

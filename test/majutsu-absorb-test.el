@@ -38,6 +38,14 @@
       (should (equal (majutsu-absorb-arguments)
                      '("--from=@" "--into=mutable()"))))))
 
+(ert-deftest majutsu-absorb-arguments-normalizes-fileset-args ()
+  "Move destination options before fileset delimiter."
+  (let ((transient-current-command 'majutsu-absorb))
+    (cl-letf (((symbol-function 'transient-args)
+               (lambda (&rest _) '(("--" "src/a.el") "--into=main"))))
+      (should (equal (majutsu-absorb-arguments)
+                     '("--into=main" "--" "src/a.el"))))))
+
 (ert-deftest majutsu-absorb-arguments-default-from-point ()
   "Outside transient, default --from to commit at point."
   (let ((transient-current-command nil))

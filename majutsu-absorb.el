@@ -46,9 +46,10 @@
 If inside the transient, return transient args.
 Otherwise, if no --from/--into is set and point is on a
 jj-commit section, add --from from that section."
-  (let ((args (if (eq transient-current-command 'majutsu-absorb)
-                  (transient-args 'majutsu-absorb)
-                '())))
+  (let ((args (majutsu--normalize-fileset-args
+               (if (eq transient-current-command 'majutsu-absorb)
+                   (transient-args 'majutsu-absorb)
+                 '()))))
     (unless (cl-some (lambda (arg)
                        (or (string-prefix-p "--from=" arg)
                            (string-prefix-p "--into=" arg)))
@@ -61,7 +62,9 @@ jj-commit section, add --from from that section."
 (defun majutsu-absorb-execute (args)
   "Execute jj absorb with ARGS from the transient."
   (interactive (list (majutsu-absorb-arguments)))
-  (let ((exit (apply #'majutsu-run-jj "absorb" args)))
+  (let ((exit (apply #'majutsu-run-jj
+                     "absorb"
+                     (majutsu--normalize-fileset-args args))))
     (when (zerop exit)
       (message "Absorb completed"))))
 
