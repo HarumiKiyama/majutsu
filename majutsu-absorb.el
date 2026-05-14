@@ -68,6 +68,16 @@ jj-commit section, add --from from that section."
     (when (zerop exit)
       (message "Absorb completed"))))
 
+;;;###autoload
+(defun majutsu-file-absorb ()
+  "Absorb changes from the file at point into the parent commit."
+  (interactive)
+  (let ((file (majutsu-file-at-point)))
+    (unless file
+      (user-error "No file at point"))
+    (when (yes-or-no-p (format "Absorb %s? " file))
+      (majutsu-run-jj "absorb" (majutsu-jj-fileset-quote file)))))
+
 ;;; Infix Commands
 
 (transient-define-argument majutsu-absorb:--from ()

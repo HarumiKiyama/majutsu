@@ -68,6 +68,35 @@ a jj-commit section, add --revision from that section."
             (majutsu-interactive-clear)))
       (majutsu-run-jj-with-editor (cons "squash" args)))))
 
+;;;###autoload
+(defun majutsu-file-squash ()
+  "Squash changes from the file at point into the parent commit."
+  (interactive)
+  (let ((file (majutsu-file-at-point)))
+    (unless file
+      (user-error "No file at point"))
+    (when (yes-or-no-p (format "Squash %s? " file))
+      (majutsu-run-jj "squash" (majutsu-jj-fileset-quote file)))))
+
+;;;###autoload
+(defun majutsu-hunk-squash ()
+  "Squash the hunk at point into the parent commit."
+  (interactive)
+  (let* ((hunk-section (magit-current-section))
+         (file-section (and hunk-section (oref hunk-section parent)))
+         (file (and file-section (oref file-section value)))
+         (header (and file-section (oref file-section header)))
+         (hunk-patch (and hunk-section
+                          (majutsu-interactive--build-hunk-patch
+                           hunk-section :all nil nil))))
+    (unless hunk-patch
+      (user-error "No hunk to squash at point"))
+    (when (yes-or-no-p "Squash this hunk? ")
+      (let ((patch (concat header hunk-patch)))
+        (majutsu-interactive-run-with-patch
+         "squash" (list (majutsu-jj-fileset-quote file))
+         patch t)))))
+
 ;;;; Infix Commands
 
 (transient-define-argument majutsu-squash:--revision ()

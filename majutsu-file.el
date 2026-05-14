@@ -597,6 +597,38 @@ Preserves line/column position from the blob buffer."
                                majutsu-buffer-blob-path
                                #'pop-to-buffer-same-window))
 
+(declare-function majutsu-diff--revisions "majutsu-diff" ())
+
+;;;###autoload
+(defun majutsu-commit-visit-blob (arg)
+  "Visit a file from the commit at point as a blob.
+With prefix ARG, prompt with all files in the revision.
+Otherwise, prompt with files changed in the commit."
+  (interactive "P")
+  (let* ((rev (or (magit-section-value-if 'jj-commit)
+                  (user-error "No commit at point")))
+         (files (if arg
+                    (majutsu-file-list rev)
+                  (majutsu-jj-lines "diff" "--name-only" "-r" rev)))
+         (file (if files
+                   (completing-read (format "Visit file from %s: " rev)
+                                    files nil t)
+                 (user-error "No files found for %s" rev))))
+    (majutsu-find-file rev file)))
+
+;;;###autoload
+(defun majutsu-file-visit-blob ()
+  "Visit the file at point as a blob.
+Always opens the blob version, never the workspace file."
+  (interactive)
+  (let* ((file (majutsu-file-at-point))
+         (rev (if (derived-mode-p 'majutsu-diff-mode)
+                  (cdr (majutsu-diff--revisions))
+                "@")))
+    (unless file
+      (user-error "No file at point"))
+    (majutsu-find-file rev file)))
+
 (defun majutsu-blob-visit-magit ()
   "Visit the current blob in `magit-blob-mode'."
   (interactive)

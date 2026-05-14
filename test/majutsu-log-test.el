@@ -909,7 +909,10 @@
             (should (eq (oref section type) 'jj-file))
             (push (oref section value) sections)))
         (setq sections (nreverse sections))
-        (should (equal sections '("file1" "file2" "file3" "file4")))))))
+        (should (equal sections '("file1" "file2" "file3" "file4")))
+        (should (string-match-p (regexp-quote "M file1\nA file2\nD file3\n? file4")
+                                (buffer-substring-no-properties
+                                 (point-min) (point-max))))))))
 
 (ert-deftest majutsu-log--wash-status-preserves-summary ()
   "Commit summary lines are preserved as plain text."
@@ -980,6 +983,105 @@
       (should (search-forward "Some unexpected output" nil t))
       (should (search-forward "without a changes header" nil t)))))
 
+(ert-deftest majutsu-log-insert-status-preserves-section-order ()
+  "Status insertion leaves point after its output for following sections."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let ((majutsu-log-sections-hook
+           '(majutsu-log-insert-status majutsu-log-insert-logs)))
+      (cl-letf (((symbol-function 'majutsu-process-jj-arguments)
+                 #'identity)
+                ((symbol-function 'majutsu-process-file)
+                 (lambda (_program _infile _buffer _display &rest args)
+                   (when (equal args '("status"))
+                     (insert "The working copy has no changes.\n"
+                             "Working copy  (@) : abc123\n"
+                             "Parent commit (@-): def456\n"))
+                   0))
+                ((symbol-function 'majutsu-log-insert-logs)
+                 (lambda ()
+                   (magit-insert-section (lograph)
+                     (magit-insert-heading "Log Graph")
+                     (insert "LOG\n")))))
+        (magit-insert-section (logbuf)
+          (run-hooks 'majutsu-log-sections-hook))
+        (goto-char (point-min))
+        (let ((status-pos (search-forward "Working Copy Status" nil t)))
+          (should status-pos)
+          (goto-char (point-min))
+          (let ((log-pos (search-forward "Log Graph" nil t)))
+            (should log-pos)
+            (should (< status-pos log-pos))))))))
+
+(ert-deftest majutsu-file-toggle-diff-loads-once-and-cycles-visibility ()
+  "TAB on a status file loads hunks once, then collapses and re-expands them."
+  (with-temp-buffer
+    (require 'magit-section)
+    (majutsu-log-mode)
+    (setq buffer-read-only nil)
+    (let ((calls 0)
+          (diff (string-join
+                 '("diff --git a/Dockerfile b/Dockerfile"
+                   "index 1234567..89abcde 100644"
+                   "--- a/Dockerfile"
+                   "+++ b/Dockerfile"
+                   "@@ -1 +1 @@"
+                   "-old"
+                   "+new")
+                 "\n"))
+          file-section)
+      (cl-letf (((symbol-function 'majutsu-jj-insert)
+                 (lambda (&rest args)
+                   (should (equal args '("diff" "--git" "Dockerfile")))
+                   (cl-incf calls)
+                   (insert diff)
+                   0)))
+        (magit-insert-section (status)
+          (let ((beg (point)))
+            (insert "Working copy changes:\nM Dockerfile\nWorking copy  (@) : abc123\n")
+            (goto-char beg)
+            (majutsu-log--wash-status nil)))
+        (goto-char (point-min))
+        (search-forward "M Dockerfile")
+        (setq file-section (magit-current-section))
+        (should-not (seq-some (lambda (overlay)
+                                (overlay-get overlay 'majutsu-file-indicator))
+                              (overlays-at (oref file-section start))))
+
+        (majutsu-file-toggle-diff)
+        (should (= calls 1))
+        (should-not (oref file-section hidden))
+        (should (= (length (oref file-section children)) 1))
+        (should (eq (oref (car (oref file-section children)) type) 'jj-hunk))
+        (should (string-prefix-p "diff --git a/Dockerfile b/Dockerfile\n"
+                                 (oref file-section header)))
+        (let ((patch (majutsu-interactive--build-file-patch
+                      file-section
+                      (list (list (car (oref file-section children)) :all)))))
+          (should (string-prefix-p "diff --git a/Dockerfile b/Dockerfile\n" patch))
+          (should-not (string-prefix-p "@@ " patch)))
+        (should-not (get-char-property (oref (car (oref file-section children)) start)
+                                       'invisible))
+
+        (goto-char (oref file-section start))
+        (majutsu-file-toggle-diff)
+        (should (= calls 1))
+        (should (oref file-section hidden))
+        (should (= (length (oref file-section children)) 1))
+        (should (get-char-property (oref (car (oref file-section children)) start)
+                                   'invisible))
+
+        (goto-char (oref file-section start))
+        (majutsu-file-toggle-diff)
+        (should (= calls 1))
+        (should-not (oref file-section hidden))
+        (should (= (length (oref file-section children)) 1))
+        (should-not (get-char-property (oref (car (oref file-section children)) start)
+                                       'invisible))
+        (should (= (how-many "^diff --git " (point-min) (point-max)) 0))))))
+
 (ert-deftest majutsu-file-section-map-has-tab-binding ()
   "`TAB' should be bound to `majutsu-file-toggle-diff' in file section map."
   (should (eq (lookup-key majutsu-file-section-map (kbd "TAB"))
@@ -989,6 +1091,31 @@
   "`k' should be bound to `majutsu-hunk-discard' in hunk section map."
   (should (eq (lookup-key majutsu-hunk-section-map "k")
               #'majutsu-hunk-discard)))
+
+(ert-deftest majutsu-file-section-map-has-absorb-binding ()
+  "`a' should be bound to `majutsu-file-absorb' in file section map."
+  (should (eq (lookup-key majutsu-file-section-map "a")
+              #'majutsu-file-absorb)))
+
+(ert-deftest majutsu-file-section-map-has-squash-binding ()
+  "`s' should be bound to `majutsu-file-squash' in file section map."
+  (should (eq (lookup-key majutsu-file-section-map "s")
+              #'majutsu-file-squash)))
+
+(ert-deftest majutsu-hunk-section-map-has-squash-binding ()
+  "`s' should be bound to `majutsu-hunk-squash' in hunk section map."
+  (should (eq (lookup-key majutsu-hunk-section-map "s")
+              #'majutsu-hunk-squash)))
+
+(ert-deftest majutsu-file-section-map-has-blob-binding ()
+  "`b' should be bound to `majutsu-file-visit-blob' in file section map."
+  (should (eq (lookup-key majutsu-file-section-map "b")
+              #'majutsu-file-visit-blob)))
+
+(ert-deftest majutsu-commit-section-map-has-blob-binding ()
+  "`f' should be bound to `majutsu-commit-visit-blob' in commit section map."
+  (should (eq (lookup-key majutsu-commit-section-map "f")
+              #'majutsu-commit-visit-blob)))
 
 (ert-deftest majutsu-file-section-map-has-discard-binding ()
   "`k' should be bound to `majutsu-restore-file-at-point' in file section map."

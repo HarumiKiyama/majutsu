@@ -19,12 +19,14 @@
 ;;; Code:
 
 (require 'majutsu)
+(require 'magit-log)
 
 ;;; Section Keymaps
 
 (defvar-keymap majutsu-commit-section-map
   :doc "Keymap for `jj-commit' sections."
-  "<remap> <majutsu-visit-thing>" #'majutsu-edit-changeset)
+  "<remap> <majutsu-visit-thing>" #'majutsu-edit-changeset
+  "f" #'majutsu-commit-visit-blob)
 
 ;;; Log State
 
@@ -1678,8 +1680,8 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
                            (line-beginning-position) (line-end-position))))
                 (delete-region beg after-line)
                 (magit-insert-section (jj-file file)
-                  (magit-insert-heading line)
-                  (insert "\n"))))))))))
+                  (magit-insert-heading line))))))))
+    (goto-char (point-max))))
 
 (defun majutsu-log-insert-status ()
   "Insert jj status into current buffer."
@@ -1692,29 +1694,46 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
 Runs `jj diff --git' for the file and inserts hunks as children."
   (let ((file (oref section value)))
     (when file
-      (let ((output (majutsu-jj-string "diff" "--git" file)))
+      (let ((output (majutsu--with-no-color
+                      (with-temp-buffer
+                        (majutsu-jj-insert "diff" "--git" file)
+                        (buffer-string)))))
         (when (and output (not (string-empty-p output)))
-          (save-excursion
-            (goto-char (oref section end))
-            (let ((beg (point)))
-              (insert output)
-              (unless (bolp)
-                (insert "\n"))
-              (save-restriction
-                (narrow-to-region beg (point))
-                (goto-char (point-min))
-                ;; Skip diff --git header and extended headers
-                (when (looking-at "^diff --git ")
-                  (forward-line 1)
+          (let ((header (with-temp-buffer
+                          (insert output)
+                          (goto-char (point-min))
+                          (let ((beg (point)))
+                            (while (and (not (eobp))
+                                        (not (looking-at-p "^@@ ")))
+                              (forward-line 1))
+                            (buffer-substring-no-properties beg (point)))))
+                (before (length (oref section children)))
+                (inhibit-read-only t)
+                (magit-insert-section--parent section)
+                (magit-insert-section--current nil)
+                (magit-insert-section--oldroot nil))
+            (save-excursion
+              (goto-char (oref section end))
+              (let ((beg (point)))
+                (insert output)
+                (unless (bolp)
+                  (insert "\n"))
+                (save-restriction
+                  (narrow-to-region beg (point))
+                  (goto-char (point-min))
                   (while (and (not (eobp))
                               (not (looking-at-p "^@@ ")))
-                    (forward-line 1))
-                  ;; Wash each hunk
+                    (majutsu-diff--delete-line))
                   (while (and (not (eobp)) (looking-at "^@@ "))
-                    (majutsu-diff-wash-hunk file))))
-              ;; Remove inserted text if no hunks were created
-              (when (= beg (point))
-                (delete-region beg (point))))))))))
+                    (majutsu-diff-wash-hunk file)))
+                (if (= before (length (oref section children)))
+                    (delete-region beg (point))
+                  (oset section header header)
+                  (if (markerp (oref section content))
+                      (set-marker (oref section content) beg)
+                    (oset section content (copy-marker beg)))
+                  (set-marker (oref section end) (point)))))
+            (> (length (oref section children)) before)))))))
 
 (defun majutsu-file-toggle-diff ()
   "Toggle diff visibility for the `jj-file' section at point.
@@ -1722,10 +1741,12 @@ If diff has not been loaded, fetch it via `jj diff --git' first."
   (interactive)
   (let ((section (magit-current-section)))
     (when (and section (eq (oref section type) 'jj-file))
-      (when (and (derived-mode-p 'majutsu-log-mode)
-                 (not (magit-section-children section)))
-        (majutsu-file--load-diff section))
-      (majutsu-section-toggle section))))
+      (if (and (derived-mode-p 'majutsu-log-mode)
+               (not (oref section children))
+               (majutsu-file--load-diff section))
+          (majutsu-section-show section)
+        (majutsu-section-toggle section))
+      nil)))
 
 ;;; Log insert conflicts
 

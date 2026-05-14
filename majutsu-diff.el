@@ -1259,12 +1259,16 @@ what the diff is about."
   :doc "Keymap for `jj-file' sections."
   :parent majutsu-diff-section-map
   "TAB" #'majutsu-file-toggle-diff
-  "k" #'majutsu-restore-file-at-point)
+  "k" #'majutsu-restore-file-at-point
+  "a" #'majutsu-file-absorb
+  "b" #'majutsu-file-visit-blob
+  "s" #'majutsu-file-squash)
 
 (defvar-keymap majutsu-hunk-section-map
   :doc "Keymap for `jj-hunk' sections."
   :parent majutsu-diff-section-map
-  "k" #'majutsu-hunk-discard)
+  "k" #'majutsu-hunk-discard
+  "s" #'majutsu-hunk-squash)
 
 ;;; Diff Commands
 
