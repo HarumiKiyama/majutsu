@@ -68,6 +68,17 @@ In diff buffer on a file section, restore only that file."
       (when (yes-or-no-p "Discard all working copy changes? ")
         (majutsu-run-jj "restore")))))
 
+;;;###autoload
+(defun majutsu-restore-file-at-point ()
+  "Restore (discard) changes to the file at point.
+Point must be on a `jj-file' section."
+  (interactive)
+  (let ((file (majutsu-file-at-point)))
+    (unless file
+      (user-error "No file at point"))
+    (when (yes-or-no-p (format "Discard changes to %s? " file))
+      (majutsu-run-jj "restore" (majutsu-jj-fileset-quote file)))))
+
 (defun majutsu-restore-execute (args)
   "Execute jj restore with ARGS from the transient."
   (interactive (list (transient-args 'majutsu-restore)))

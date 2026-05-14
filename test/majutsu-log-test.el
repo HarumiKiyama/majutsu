@@ -980,4 +980,24 @@
       (should (search-forward "Some unexpected output" nil t))
       (should (search-forward "without a changes header" nil t)))))
 
+(ert-deftest majutsu-file-section-map-has-discard-binding ()
+  "`k' should be bound to `majutsu-restore-file-at-point' in file section map."
+  (should (eq (lookup-key majutsu-file-section-map "k")
+              #'majutsu-restore-file-at-point)))
+
+(ert-deftest majutsu-restore-file-at-point-gets-file-from-section ()
+  "`majutsu-restore-file-at-point' should get the file path from the section at point."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (magit-insert-section (jj-file "test/file.el")
+        (magit-insert-heading "M test/file.el")
+        (insert "\n"))
+      (goto-char (point-min))
+      (search-forward "M test/file.el")
+      (let ((file (majutsu-file-at-point)))
+        (should (equal file "test/file.el"))))))
+
 ;;; majutsu-log-test.el ends here

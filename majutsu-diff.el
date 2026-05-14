@@ -1257,7 +1257,8 @@ what the diff is about."
 
 (defvar-keymap majutsu-file-section-map
   :doc "Keymap for `jj-file' sections."
-  :parent majutsu-diff-section-map)
+  :parent majutsu-diff-section-map
+  "k" #'majutsu-restore-file-at-point)
 
 (defvar-keymap majutsu-hunk-section-map
   :doc "Keymap for `jj-hunk' sections."
