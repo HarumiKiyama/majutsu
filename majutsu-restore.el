@@ -79,6 +79,26 @@ Point must be on a `jj-file' section."
     (when (yes-or-no-p (format "Discard changes to %s? " file))
       (majutsu-run-jj "restore" (majutsu-jj-fileset-quote file)))))
 
+;;;###autoload
+(defun majutsu-hunk-discard ()
+  "Discard the hunk at point.
+Point must be on a `jj-hunk' section."
+  (interactive)
+  (let* ((hunk-section (magit-current-section))
+         (file-section (and hunk-section (oref hunk-section parent)))
+         (file (and file-section (oref file-section value)))
+         (header (and file-section (oref file-section header)))
+         (hunk-patch (and hunk-section
+                          (majutsu-interactive--build-hunk-patch
+                           hunk-section :all nil nil))))
+    (unless hunk-patch
+      (user-error "No hunk to discard at point"))
+    (when (yes-or-no-p "Discard this hunk? ")
+      (let ((patch (concat header hunk-patch)))
+        (majutsu-interactive-run-with-patch
+         "restore" (list (majutsu-jj-fileset-quote file))
+         patch t)))))
+
 (defun majutsu-restore-execute (args)
   "Execute jj restore with ARGS from the transient."
   (interactive (list (transient-args 'majutsu-restore)))

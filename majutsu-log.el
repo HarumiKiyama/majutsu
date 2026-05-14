@@ -1687,6 +1687,46 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
     (magit-insert-heading "Working Copy Status")
     (majutsu-jj-wash #'majutsu-log--wash-status nil "status")))
 
+(defun majutsu-file--load-diff (section)
+  "Load diff content for the `jj-file' SECTION.
+Runs `jj diff --git' for the file and inserts hunks as children."
+  (let ((file (oref section value)))
+    (when file
+      (let ((output (majutsu-jj-string "diff" "--git" file)))
+        (when (and output (not (string-empty-p output)))
+          (save-excursion
+            (goto-char (oref section end))
+            (let ((beg (point)))
+              (insert output)
+              (unless (bolp)
+                (insert "\n"))
+              (save-restriction
+                (narrow-to-region beg (point))
+                (goto-char (point-min))
+                ;; Skip diff --git header and extended headers
+                (when (looking-at "^diff --git ")
+                  (forward-line 1)
+                  (while (and (not (eobp))
+                              (not (looking-at-p "^@@ ")))
+                    (forward-line 1))
+                  ;; Wash each hunk
+                  (while (and (not (eobp)) (looking-at "^@@ "))
+                    (majutsu-diff-wash-hunk file))))
+              ;; Remove inserted text if no hunks were created
+              (when (= beg (point))
+                (delete-region beg (point))))))))))
+
+(defun majutsu-file-toggle-diff ()
+  "Toggle diff visibility for the `jj-file' section at point.
+If diff has not been loaded, fetch it via `jj diff --git' first."
+  (interactive)
+  (let ((section (magit-current-section)))
+    (when (and section (eq (oref section type) 'jj-file))
+      (when (and (derived-mode-p 'majutsu-log-mode)
+                 (not (magit-section-children section)))
+        (majutsu-file--load-diff section))
+      (majutsu-section-toggle section))))
+
 ;;; Log insert conflicts
 
 (defun majutsu-log-insert-conflicts ()

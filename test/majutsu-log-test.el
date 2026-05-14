@@ -980,6 +980,16 @@
       (should (search-forward "Some unexpected output" nil t))
       (should (search-forward "without a changes header" nil t)))))
 
+(ert-deftest majutsu-file-section-map-has-tab-binding ()
+  "`TAB' should be bound to `majutsu-file-toggle-diff' in file section map."
+  (should (eq (lookup-key majutsu-file-section-map (kbd "TAB"))
+              #'majutsu-file-toggle-diff)))
+
+(ert-deftest majutsu-hunk-section-map-has-discard-binding ()
+  "`k' should be bound to `majutsu-hunk-discard' in hunk section map."
+  (should (eq (lookup-key majutsu-hunk-section-map "k")
+              #'majutsu-hunk-discard)))
+
 (ert-deftest majutsu-file-section-map-has-discard-binding ()
   "`k' should be bound to `majutsu-restore-file-at-point' in file section map."
   (should (eq (lookup-key majutsu-file-section-map "k")
