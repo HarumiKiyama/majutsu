@@ -36,6 +36,43 @@
                     %)
               majutsu-buffer-diff-range))))
 
+(defun majutsu-split--interactive-args-p (args)
+  "Return non-nil when ARGS request Majutsu interactive split selection."
+  (and (member "--interactive" args)
+       (not (seq-some (lambda (arg)
+                        (and (stringp arg)
+                             (string-prefix-p "--tool" arg)))
+                      args))))
+
+(defun majutsu-split--filesets-from-args (args)
+  "Return filesets after `--' in normalized ARGS."
+  (when-let* ((tail (cdr (member "--" args))))
+    tail))
+
+(defun majutsu-split--revision-from-args (args)
+  "Return split target revision from ARGS or context."
+  (or (when-let* ((arg (seq-find (lambda (arg)
+                                   (and (stringp arg)
+                                        (string-prefix-p "--revision=" arg)))
+                                 args)))
+        (substring arg 11))
+      (magit-section-value-if 'jj-commit)
+      "@"))
+
+(defun majutsu-split--start-interactive-selection (args)
+  "Open a Majutsu diff buffer for interactive split selection using ARGS."
+  (with-current-buffer (majutsu-interactive--selection-buffer)
+    (when (derived-mode-p 'majutsu-diff-mode)
+      (user-error "Select hunks, files, or regions before executing interactive split")))
+  (let* ((revision (majutsu-split--revision-from-args args))
+         (filesets (majutsu-split--filesets-from-args args))
+         (buffer (majutsu-diff-setup-buffer
+                  nil
+                  (list (concat "--revisions=" revision))
+                  filesets)))
+    (with-current-buffer buffer
+      (majutsu-split))))
+
 (defun majutsu-split-execute (args)
   "Execute split with selections recorded in the transient."
   (interactive (list (transient-args 'majutsu-split)))
@@ -57,7 +94,9 @@
           (majutsu-interactive-run-with-patch "split" args patch t)
           (with-current-buffer selection-buf
             (majutsu-interactive-clear)))
-      (majutsu-run-jj-with-editor (cons "split" args)))))
+      (if (majutsu-split--interactive-args-p args)
+          (majutsu-split--start-interactive-selection args)
+        (majutsu-run-jj-with-editor (cons "split" args))))))
 
 ;;;; Infix Commands
 

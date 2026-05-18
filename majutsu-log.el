@@ -21,6 +21,13 @@
 (require 'majutsu)
 (require 'magit-log)
 
+;;; Faces
+
+(defface majutsu-log-bookmark-face
+  '((t :inherit font-lock-function-name-face))
+  "Face used for bookmark names in Majutsu log headings."
+  :group 'majutsu)
+
 ;;; Section Keymaps
 
 (defvar-keymap majutsu-commit-section-map
@@ -243,7 +250,7 @@ navigation remain available.")
 
 (defcustom majutsu-log-commit-columns
   '((:field change-id :module heading :face t)
-    (:field bookmarks :module heading :face magit-branch-local)
+    (:field bookmarks :module heading :face majutsu-log-bookmark-face)
     (:field tags :module heading :face magit-tag)
     (:field working-copies :module heading :face magit-branch-remote)
     (:field empty :module heading :face t)

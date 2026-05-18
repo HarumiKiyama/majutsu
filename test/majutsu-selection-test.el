@@ -111,5 +111,39 @@
         (should (equal (oref consumer value) '("1")))
         (should (listp (oref consumer value)))))))
 
+(ert-deftest majutsu-selection-incompatible-clears-synced-options-test ()
+  "Clearing an incompatible option should also clear its toggle counterpart."
+  (let* ((revision (make-instance 'majutsu-test-option
+                                  :command 'ignore
+                                  :key "-r"
+                                  :argument "--revision="))
+         (from (make-instance 'majutsu-test-option
+                              :command 'ignore
+                              :key "-f"
+                              :argument "--from="
+                              :multi-value 'repeat))
+         (revision-toggle (make-instance 'majutsu-selection-toggle-option
+                                         :command 'ignore
+                                         :key "r"
+                                         :argument "--revision="))
+         (from-toggle (make-instance 'majutsu-selection-toggle-option
+                                     :command 'ignore
+                                     :key "f"
+                                     :argument "--from="
+                                     :multi-value 'repeat))
+         (transient--suffixes (list revision from revision-toggle from-toggle))
+         (transient--prefix
+          (make-instance 'transient-prefix
+                         :command 'ignore
+                         :incompatible '(("--revision=" "--from=")))))
+    (transient-infix-set revision-toggle "abc")
+    (should (equal (oref revision value) "abc"))
+    (transient-infix-set from-toggle '("abc"))
+    (should-not (oref revision value))
+    (should-not (oref revision-toggle value))
+    (transient-infix-set revision-toggle "abc")
+    (should-not (oref from value))
+    (should-not (oref from-toggle value))))
+
 (provide 'majutsu-selection-test)
 ;;; majutsu-selection-test.el ends here

@@ -134,6 +134,29 @@
     (should (equal (plist-get spec :post)
                    (majutsu-log--default-postprocessors-for-field 'description)))))
 
+(ert-deftest majutsu-log-default-bookmark-face-is-distinct ()
+  "Default bookmark heading text should use the dedicated bookmark face."
+  (let* ((spec (seq-find (lambda (column)
+                           (eq (plist-get column :field) 'bookmarks))
+                         majutsu-log-commit-columns))
+         (compiled (majutsu-log--compile-columns
+                    '((:field bookmarks :module heading :face majutsu-log-bookmark-face)
+                      (:field description :module heading :face t)
+                      (:field id :module metadata :face nil))))
+         (entry (list :columns '((bookmarks . "main")
+                                 (description . "Title"))
+                      :heading-prefixes '("")))
+         (heading (majutsu-log--render-heading-content entry compiled))
+         (bookmark-pos (string-match "main" heading))
+         (description-pos (string-match "Title" heading)))
+    (should (eq (plist-get spec :face) 'majutsu-log-bookmark-face))
+    (should bookmark-pos)
+    (should description-pos)
+    (should (eq (get-text-property bookmark-pos 'font-lock-face heading)
+                'majutsu-log-bookmark-face))
+    (should-not (eq (get-text-property description-pos 'font-lock-face heading)
+                    'majutsu-log-bookmark-face))))
+
 (ert-deftest majutsu-log-explicit-default-postprocessors-keep-field-defaults ()
   "Explicit `:post :default' should retain field-specific defaults."
   (let ((spec (majutsu-log--normalize-column-spec '(:field parent-ids :post :default))))

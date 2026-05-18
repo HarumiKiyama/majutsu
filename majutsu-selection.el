@@ -333,7 +333,8 @@ ID must be a single selection category."
 
 (cl-defmethod transient-infix-set ((obj majutsu-selection-option) value)
   (cl-call-next-method)
-  (when (and (not majutsu-selection--infix-syncing)
+  (when (and (or (not majutsu-selection--infix-syncing)
+                 (null value))
              (boundp 'transient--suffixes)
              (consp transient--suffixes)
              (slot-boundp obj 'argument))
@@ -343,7 +344,8 @@ ID must be a single selection category."
         (when (and (not (eq other obj))
                    (cl-typep other 'majutsu-selection-option)
                    (slot-boundp other 'argument)
-                   (equal (oref other argument) argument))
+                   (equal (oref other argument) argument)
+                   (not (equal (oref other value) value)))
           (transient-infix-set other value)))))
   (majutsu-selection-render))
 
