@@ -34,6 +34,18 @@
   (cl-letf (((symbol-function 'majutsu-jj-string) (lambda (&rest _args) nil)))
     (should-not (majutsu-file-next-change "rev" "path"))))
 
+(ert-deftest majutsu-file-changed-list/uses-diff-name-only ()
+  "Changed-file candidates should come from the selected revision diff."
+  (let (seen-args)
+    (cl-letf (((symbol-function 'majutsu-file--root)
+               (lambda () "/repo/"))
+              ((symbol-function 'majutsu-jj-lines)
+               (lambda (&rest args)
+                 (setq seen-args args)
+                 '("src/a.el"))))
+      (should (equal (majutsu-file-changed-list "abc") '("src/a.el")))
+      (should (equal seen-args '("diff" "-r" "abc" "--name-only"))))))
+
 (ert-deftest majutsu-find-file-noselect/filesystem-relative-to-root ()
   "Relative FILE is resolved from the repository root for filesystem visits."
   (let* ((root (make-temp-file "majutsu-file-root-" t))

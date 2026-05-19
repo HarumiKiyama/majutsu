@@ -321,6 +321,11 @@ Results are cached in `majutsu-file--list-cache`."
   "Return list of file paths for REVSET (default \"@\")."
   (majutsu-file--list (or revset "@") (majutsu-file--root)))
 
+(defun majutsu-file-changed-list (&optional revset)
+  "Return list of paths changed by REVSET (default \"@\")."
+  (let ((default-directory (majutsu-file--root)))
+    (majutsu-jj-lines "diff" "-r" (or revset "@") "--name-only")))
+
 (defun majutsu-read-files (prompt initial-input history &optional list-fn)
   "Read multiple files with completion.
 PROMPT, INITIAL-INPUT, HISTORY are standard reader args.

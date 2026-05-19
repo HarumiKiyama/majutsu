@@ -36,6 +36,17 @@
                     %)
               majutsu-buffer-diff-range))))
 
+(defun majutsu-split--initial-args ()
+  "Return initial transient args for split."
+  (let ((args (or (majutsu-split--default-args) '())))
+    (if (or (member "--interactive" args)
+            (seq-some (lambda (arg)
+                        (and (stringp arg)
+                             (string-prefix-p "--tool" arg)))
+                      args))
+        args
+      (cons "--interactive" args))))
+
 (defun majutsu-split--interactive-args-p (args)
   "Return non-nil when ARGS request Majutsu interactive split selection."
   (and (member "--interactive" args)
@@ -59,6 +70,21 @@
       (magit-section-value-if 'jj-commit)
       "@"))
 
+(defun majutsu-split--read-files (prompt initial-input history)
+  "Read split files with completion limited to the selected revision."
+  (let* ((args (if (eq transient-current-command 'majutsu-split)
+                   (transient-args 'majutsu-split)
+                 '()))
+         (revision (majutsu-split--revision-from-args args)))
+    (majutsu-read-files
+     prompt initial-input history
+     (lambda ()
+       (majutsu-file-changed-list revision)))))
+
+(defun majutsu-split--setup-selection-buffer (range filesets)
+  "Open a lazy file-list selection buffer for split."
+  (majutsu-diff-setup-file-list-buffer range filesets))
+
 (defun majutsu-split--start-interactive-selection (args)
   "Open a Majutsu diff buffer for interactive split selection using ARGS."
   (with-current-buffer (majutsu-interactive--selection-buffer)
@@ -66,8 +92,7 @@
       (user-error "Select hunks, files, or regions before executing interactive split")))
   (let* ((revision (majutsu-split--revision-from-args args))
          (filesets (majutsu-split--filesets-from-args args))
-         (buffer (majutsu-diff-setup-buffer
-                  nil
+         (buffer (majutsu-split--setup-selection-buffer
                   (list (concat "--revisions=" revision))
                   filesets)))
     (with-current-buffer buffer
@@ -178,7 +203,7 @@
   :key "--"
   :argument "--"
   :prompt "Limit to file,s: "
-  :reader #'majutsu-read-files
+  :reader #'majutsu-split--read-files
   :multi-value t)
 
 ;;;; Prefix
@@ -222,7 +247,7 @@
    'majutsu-split nil nil
    :scope
    (majutsu-selection-session-begin)
-   :value (or (majutsu-split--default-args) '())))
+   :value (majutsu-split--initial-args)))
 
 ;;; _
 (provide 'majutsu-split)

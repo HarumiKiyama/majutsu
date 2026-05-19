@@ -305,9 +305,13 @@ This mirrors Magit's behavior."
                  (`("workspace" "list" "-T" "name ++ \"\\n\"") '("ws-a" "ws-b"))
                  (`("bookmark" "list" "--quiet" "-T" "name ++ \"\\n\"") '("main" "feature"))
                  (`("tag" "list" "--quiet" "-T" "name ++ \"\\n\"") '("v1.0" "main"))
+                 (`("log" "--no-graph" "--limit" ,_ "-T"
+                    "change_id.shortest(8) ++ \"\\n\"")
+                  '("abc12345" "main"))
                  (_ nil)))))
     (should (equal (majutsu-jj-revset-candidates "main")
-                   '("main" "@" "@-" "@+" "ws-a@" "ws-b@" "feature" "v1.0")))))
+                   '("main" "@" "@-" "@+" "ws-a@" "ws-b@"
+                     "feature" "v1.0" "abc12345")))))
 
 (ert-deftest majutsu-jj-revset-candidate-data/provides-source-annotations ()
   "Candidate data should preserve source kinds for metadata annotations."
@@ -317,13 +321,17 @@ This mirrors Magit's behavior."
                  (`("workspace" "list" "-T" "name ++ \"\\n\"") '("ws-a"))
                  (`("bookmark" "list" "--quiet" "-T" "name ++ \"\\n\"") '("main"))
                  (`("tag" "list" "--quiet" "-T" "name ++ \"\\n\"") '("main" "v1.0"))
+                 (`("log" "--no-graph" "--limit" ,_ "-T"
+                    "change_id.shortest(8) ++ \"\\n\"")
+                  '("abc12345"))
                  (_ nil)))))
     (let* ((data (majutsu-jj-revset-candidate-data "main"))
            (sources (plist-get data :sources))
            (annotation (majutsu-jj--revset-annotation-function sources)))
       (should (equal (funcall annotation "@") "  [pseudo]"))
       (should (equal (funcall annotation "ws-a@") "  [workspace]"))
-      (should (equal (funcall annotation "main") "  [bookmark,tag]")))))
+      (should (equal (funcall annotation "main") "  [bookmark,tag]"))
+      (should (equal (funcall annotation "abc12345") "  [change]")))))
 
 (ert-deftest majutsu-read-revset/uses-completion-and-allows-free-form ()
   "Revset reader should use completion metadata and allow free-form input."

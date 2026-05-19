@@ -60,6 +60,9 @@
   "Hash table mapping hunk-id to selection spec.
 Selection spec is either `:all' for whole hunk, or (BEG . END) for region.")
 
+(defvar-local majutsu-interactive--file-selections nil
+  "Hash table mapping file sections to file-level selection state.")
+
 (defvar-local majutsu-interactive--overlays nil
   "List of overlays for selection visualization.")
 
@@ -77,6 +80,11 @@ Selection spec is either `:all' for whole hunk, or (BEG . END) for region.")
   (unless majutsu-interactive--selections
     (setq majutsu-interactive--selections (make-hash-table :test 'equal))))
 
+(defun majutsu-interactive--ensure-file-selections ()
+  "Ensure file selections hash table exists."
+  (unless majutsu-interactive--file-selections
+    (setq majutsu-interactive--file-selections (make-hash-table :test 'eq))))
+
 (defun majutsu-interactive--get-selection (hunk-id)
   "Get selection for HUNK-ID."
   (majutsu-interactive--ensure-selections)
@@ -89,10 +97,24 @@ Selection spec is either `:all' for whole hunk, or (BEG . END) for region.")
       (puthash hunk-id spec majutsu-interactive--selections)
     (remhash hunk-id majutsu-interactive--selections)))
 
+(defun majutsu-interactive--get-file-selection (file-section)
+  "Return file-level selection state for FILE-SECTION."
+  (majutsu-interactive--ensure-file-selections)
+  (gethash file-section majutsu-interactive--file-selections))
+
+(defun majutsu-interactive--set-file-selection (file-section selected)
+  "Set file-level SELECTED state for FILE-SECTION."
+  (majutsu-interactive--ensure-file-selections)
+  (if selected
+      (puthash file-section t majutsu-interactive--file-selections)
+    (remhash file-section majutsu-interactive--file-selections)))
+
 (defun majutsu-interactive--has-selections-p ()
   "Return non-nil if there are any selections."
-  (and majutsu-interactive--selections
-       (> (hash-table-count majutsu-interactive--selections) 0)))
+  (or (and majutsu-interactive--selections
+           (> (hash-table-count majutsu-interactive--selections) 0))
+      (and majutsu-interactive--file-selections
+           (> (hash-table-count majutsu-interactive--file-selections) 0))))
 
 (defun majutsu-interactive-has-selections-p (&optional buffer)
   "Return non-nil if BUFFER has interactive selections."
@@ -148,23 +170,25 @@ When CONTEXT-ON-ADDED is non-nil, treat unselected added lines as context."
       (when (and file-section (magit-section-match 'jj-file file-section))
         (unless (seq-some (lambda (child) (magit-section-match 'jj-hunk child))
                           (oref file-section children))
-          (setq file-section (majutsu-interactive--file-section-with-hunks file)))
-        (unless file-section
-          (user-error "No hunks for file at point"))
+          (setq file-section
+                (or (majutsu-interactive--file-section-with-hunks file)
+                    file-section)))
         (let* ((hunks (oref file-section children))
-               (all-selected (cl-every
-                              (lambda (h)
-                                (majutsu-interactive--get-selection
-                                 (majutsu-interactive--hunk-id h)))
-                              hunks)))
+               (hunk-sections (seq-filter
+                               (lambda (child)
+                                 (magit-section-match 'jj-hunk child))
+                               hunks))
+               (current (majutsu-interactive--get-file-selection file-section)))
+          (majutsu-interactive--set-file-selection file-section (not current))
           (dolist (hunk hunks)
             (when (magit-section-match 'jj-hunk hunk)
               (majutsu-interactive--set-selection
                (majutsu-interactive--hunk-id hunk)
-               (unless all-selected :all))))
+               (unless current :all))))
           (majutsu-interactive--render-overlays)
-          (message "%s all hunks in file"
-                   (if all-selected "Deselected" "Selected")))))))
+          (message "%s %s"
+                   (if current "Deselected" "Selected")
+                   (if hunk-sections "file" "file metadata")))))))
 
 (defun majutsu-interactive--normalize-line-range (start end limit-start limit-end)
   "Return a line-aligned range between START and END.
@@ -224,6 +248,7 @@ The range is clamped to LIMIT-START and LIMIT-END."
   "Clear all selections."
   (interactive)
   (setq majutsu-interactive--selections nil)
+  (setq majutsu-interactive--file-selections nil)
   (majutsu-interactive--render-overlays)
   (message "Cleared all selections"))
 
@@ -268,28 +293,60 @@ The range is clamped to LIMIT-START and LIMIT-END."
   (mapc #'delete-overlay majutsu-interactive--overlays)
   (setq majutsu-interactive--overlays nil))
 
+(defun majutsu-interactive--add-marker-overlay (section marker &optional face)
+  "Add MARKER before SECTION heading using FACE."
+  (let* ((start (oref section start))
+         (end (min (point-max) (1+ start)))
+         (ov (make-overlay start end nil t nil)))
+    (overlay-put ov 'before-string
+                 (propertize (concat marker " ")
+                             'face (or face 'bold)))
+    (overlay-put ov 'evaporate t)
+    (push ov majutsu-interactive--overlays)))
+
+(defun majutsu-interactive--mark-file-partial (file-section states)
+  "Record FILE-SECTION partial state in STATES unless fully selected."
+  (unless (gethash file-section states)
+    (puthash file-section :partial states)))
+
 (defun majutsu-interactive--render-overlays ()
   "Render overlays for current selections."
   (majutsu-interactive--clear-overlays)
-  (let ((selections majutsu-interactive--selections))
+  (let ((selections majutsu-interactive--selections)
+        (file-states (make-hash-table :test 'eq)))
+    (when majutsu-interactive--file-selections
+      (maphash
+       (lambda (file-section _selected)
+         (when (and (cl-typep file-section 'magit-section)
+                    (marker-position (oref file-section start)))
+           (puthash file-section :full file-states)))
+       majutsu-interactive--file-selections))
     (when selections
       (maphash
        (lambda (hunk-id spec)
          (when-let* ((section (majutsu-interactive--find-hunk-section hunk-id)))
+           (majutsu-interactive--mark-file-partial (oref section parent) file-states)
            (cond
             ((eq spec :all)
-             (let ((ov (make-overlay (oref section start) (oref section end))))
-               (overlay-put ov 'face 'majutsu-interactive-selected-hunk)
-               (overlay-put ov 'evaporate t)
-               (push ov majutsu-interactive--overlays)))
+             (majutsu-interactive--add-marker-overlay section "[x]" 'success))
             ((consp spec)
+             (majutsu-interactive--add-marker-overlay section "[~]" 'warning)
              (let ((ranges (if (and spec (consp (car spec))) spec (list spec))))
                (dolist (range ranges)
                  (let ((ov (make-overlay (car range) (cdr range))))
                    (overlay-put ov 'face 'majutsu-interactive-selected-region)
                    (overlay-put ov 'evaporate t)
                    (push ov majutsu-interactive--overlays))))))))
-       selections))))
+       selections))
+    (maphash
+     (lambda (file-section state)
+       (when (and (cl-typep file-section 'magit-section)
+                  (marker-position (oref file-section start)))
+         (majutsu-interactive--add-marker-overlay
+          file-section
+          (if (eq state :full) "[x]" "[~]")
+          (if (eq state :full) 'success 'warning))))
+     file-states)))
 
 (defun majutsu-interactive--find-hunk-section (hunk-id)
   "Find hunk section with HUNK-ID in current buffer."
@@ -316,6 +373,18 @@ Returns list of (FILE-SECTION HUNK-SECTION SPEC)."
          (when-let* ((hunk (majutsu-interactive--find-hunk-section hunk-id)))
            (push (list (oref hunk parent) hunk spec) result)))
        majutsu-interactive--selections))
+    (nreverse result)))
+
+(defun majutsu-interactive--collect-selected-files ()
+  "Collect file sections selected at file level."
+  (let (result)
+    (when majutsu-interactive--file-selections
+      (maphash
+       (lambda (file-section _selected)
+         (when (and (cl-typep file-section 'magit-section)
+                    (marker-position (oref file-section start)))
+           (push file-section result)))
+       majutsu-interactive--file-selections))
     (nreverse result)))
 
 (defun majutsu-interactive--collect-hunks-by-file ()
@@ -481,13 +550,40 @@ Return a hunk string or nil when no change lines remain."
   (let ((header (oref file-section header)))
     (string-match-p "^--- /dev/null$" header)))
 
-(defun majutsu-interactive--build-file-patch (file-section hunks-with-specs &optional invert context-on-added)
+(defun majutsu-interactive--rename-from-path (header)
+  "Return rename source path from HEADER, or nil."
+  (when (string-match "^rename from \\(.+\\)$" header)
+    (match-string 1 header)))
+
+(defun majutsu-interactive--rename-content-header (header)
+  "Return HEADER rewritten to patch renamed file content at the old path."
+  (if-let* ((old-path (majutsu-interactive--rename-from-path header)))
+      (let (lines)
+        (dolist (line (split-string header "\n"))
+          (cond
+           ((string-prefix-p "diff --git " line)
+            (push (format "diff --git a/%s b/%s" old-path old-path) lines))
+           ((string-prefix-p "similarity index " line))
+           ((string-prefix-p "rename from " line))
+           ((string-prefix-p "rename to " line))
+           ((string-prefix-p "+++ " line)
+            (push (format "+++ b/%s" old-path) lines))
+           (t
+            (push line lines))))
+        (string-join (nreverse lines) "\n"))
+    header))
+
+(defun majutsu-interactive--build-file-patch (file-section hunks-with-specs &optional invert context-on-added include-file-metadata)
   "Build patch string for FILE-SECTION with HUNKS-WITH-SPECS.
 HUNKS-WITH-SPECS is list of (HUNK-SECTION SPEC [INVERT]).
 When INVERT is non-nil, invert selected hunks by default.
 When CONTEXT-ON-ADDED is non-nil, treat unselected added lines as context.
+When INCLUDE-FILE-METADATA is non-nil, preserve file-level metadata.
 Note: context-on-added is disabled for new files (--- /dev/null)."
-  (let ((header (oref file-section header))
+  (let ((header (if include-file-metadata
+                    (oref file-section header)
+                  (majutsu-interactive--rename-content-header
+                   (oref file-section header))))
         (hunk-patches nil)
         ;; New files cannot have context lines, so disable context-on-added
         (effective-context-on-added (and context-on-added
@@ -512,15 +608,22 @@ When INCLUDE-ALL-FILES is non-nil, include hunks from all files in invert mode.
 When CONTEXT-ON-ADDED is non-nil, treat unselected added lines as context.
 Returns patch string or nil if no selections."
   (let* ((selected (majutsu-interactive--collect-selected-hunks))
+         (selected-files (majutsu-interactive--collect-selected-files))
+         (selected-file-set (make-hash-table :test 'eq))
          (by-file (make-hash-table :test 'eq)))
-    (unless selected
+    (unless (or selected selected-files)
       (user-error "No hunks selected"))
+    (dolist (file selected-files)
+      (puthash file t selected-file-set))
     ;; Group by file section
     (dolist (item selected)
       (let ((file (car item))
             (hunk (cadr item))
             (spec (caddr item)))
         (push (list hunk spec) (gethash file by-file))))
+    (dolist (file selected-files)
+      (unless (gethash file by-file)
+        (puthash file nil by-file)))
     ;; Build patches per file
     (let* ((patches nil)
            (all-hunks-by-file (and invert (majutsu-interactive--collect-hunks-by-file))))
@@ -528,10 +631,14 @@ Returns patch string or nil if no selections."
        ((not invert)
         (maphash
          (lambda (file hunks)
-           (let ((hunks (nreverse hunks)))
-             (when-let* ((patch (majutsu-interactive--build-file-patch
-                                 file hunks invert context-on-added)))
-               (push patch patches))))
+           (let ((hunks (nreverse hunks))
+                 (file-selected (gethash file selected-file-set)))
+             (if hunks
+                 (when-let* ((patch (majutsu-interactive--build-file-patch
+                                     file hunks invert context-on-added file-selected)))
+                   (push patch patches))
+               (when file-selected
+                 (push (oref file header) patches)))))
          by-file))
        (include-all-files
         (maphash

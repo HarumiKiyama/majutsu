@@ -168,8 +168,13 @@ remote prefix from DIRECTORY so the result remains remote."
 (defvar majutsu-read-revset-history nil
   "Minibuffer history for `majutsu-read-revset'.")
 
+(defcustom majutsu-jj-revset-change-id-candidate-limit 50
+  "Maximum number of recent change ids to include in revset completion."
+  :group 'majutsu
+  :type 'integer)
+
 (defconst majutsu-jj--revset-source-order
-  '(pseudo workspace bookmark tag)
+  '(pseudo workspace bookmark tag change)
   "Source display order for revset completion metadata.")
 
 (defun majutsu-jj--safe-lines (&rest args)
@@ -212,7 +217,12 @@ The return value is a plist with keys :candidates and :sources."
          (ordered nil)
          (workspaces (majutsu-jj--safe-lines "workspace" "list" "-T" "name ++ \"\\n\""))
          (bookmarks (majutsu-jj--safe-lines "bookmark" "list" "--quiet" "-T" "name ++ \"\\n\""))
-         (tags (majutsu-jj--safe-lines "tag" "list" "--quiet" "-T" "name ++ \"\\n\"")))
+         (tags (majutsu-jj--safe-lines "tag" "list" "--quiet" "-T" "name ++ \"\\n\""))
+         (changes (and (> majutsu-jj-revset-change-id-candidate-limit 0)
+                       (majutsu-jj--safe-lines
+                        "log" "--no-graph" "--limit"
+                        (number-to-string majutsu-jj-revset-change-id-candidate-limit)
+                        "-T" "change_id.shortest(8) ++ \"\\n\""))))
     (cl-labels ((add (candidate source)
                   (when (and (stringp candidate) (not (string-empty-p candidate)))
                     (unless (gethash candidate sources)
@@ -225,7 +235,9 @@ The return value is a plist with keys :candidates and :sources."
       (dolist (name bookmarks)
         (add name 'bookmark))
       (dolist (name tags)
-        (add name 'tag)))
+        (add name 'tag))
+      (dolist (change changes)
+        (add change 'change)))
     (let ((candidates (if (and default (not (string-empty-p default)))
                           (cons default (delete default ordered))
                         ordered)))

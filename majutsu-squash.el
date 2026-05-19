@@ -17,6 +17,9 @@
 ;;; Code:
 
 (require 'majutsu)
+(require 'majutsu-file)
+(require 'majutsu-selection)
+(require 'majutsu-interactive)
 
 (defclass majutsu-squash-option (majutsu-selection-option)
   ())
@@ -51,6 +54,46 @@ a jj-commit section, add --revision from that section."
       (mapcar (##if (string-prefix-p "--revisions=" %) (concat "--revision=" (substring % 12)))
               majutsu-buffer-diff-range))))
 
+(defun majutsu-squash--initial-args ()
+  "Return initial transient args for squash."
+  (let ((args (or (majutsu-squash--default-args) '())))
+    (if (or (member "--interactive" args)
+            (seq-some (lambda (arg)
+                        (and (stringp arg)
+                             (string-prefix-p "--tool" arg)))
+                      args))
+        args
+      (cons "--interactive" args))))
+
+(defun majutsu-squash--interactive-args-p (args)
+  "Return non-nil when ARGS request Majutsu interactive squash selection."
+  (and (member "--interactive" args)
+       (not (seq-some (lambda (arg)
+                        (and (stringp arg)
+                             (string-prefix-p "--tool" arg)))
+                      args))))
+
+(defun majutsu-squash--filesets-from-args (args)
+  "Return filesets after `--' in normalized ARGS."
+  (when-let* ((tail (cdr (member "--" args))))
+    tail))
+
+(defun majutsu-squash--setup-selection-buffer (range filesets)
+  "Open a lazy file-list selection buffer for squash."
+  (majutsu-diff-setup-file-list-buffer range filesets))
+
+(defun majutsu-squash--start-interactive-selection (args)
+  "Open a Majutsu diff buffer for interactive squash selection using ARGS."
+  (with-current-buffer (majutsu-interactive--selection-buffer)
+    (when (derived-mode-p 'majutsu-diff-mode)
+      (user-error "Select hunks, files, or regions before executing interactive squash")))
+  (let* ((revisions (majutsu-squash--fileset-revsets-from-args args))
+         (range (mapcar (lambda (rev) (concat "--revisions=" rev)) revisions))
+         (filesets (majutsu-squash--filesets-from-args args))
+         (buffer (majutsu-squash--setup-selection-buffer range filesets)))
+    (with-current-buffer buffer
+      (majutsu-squash))))
+
 (defun majutsu-squash-execute (args)
   "Execute squash with selections recorded in the transient."
   (interactive (list (majutsu-squash-arguments)))
@@ -58,7 +101,13 @@ a jj-commit section, add --revision from that section."
          ;; Generate patch for SELECTED content (invert=nil)
          ;; This is what gets squashed into parent
          (patch (majutsu-interactive-build-patch-if-selected selection-buf nil nil))
-         (args (majutsu--normalize-fileset-args args)))
+         (args (majutsu--normalize-fileset-args args))
+         (args (if patch
+                   (seq-remove (lambda (arg)
+                                 (or (string= arg "--interactive")
+                                     (string-prefix-p "--tool=" arg)))
+                               args)
+                 args)))
     (if patch
         (progn
           ;; reverse=t means reset $right to $left, then apply patch forward
@@ -66,7 +115,46 @@ a jj-commit section, add --revision from that section."
           (majutsu-interactive-run-with-patch "squash" args patch t)
           (with-current-buffer selection-buf
             (majutsu-interactive-clear)))
-      (majutsu-run-jj-with-editor (cons "squash" args)))))
+      (if (majutsu-squash--interactive-args-p args)
+          (majutsu-squash--start-interactive-selection args)
+        (majutsu-run-jj-with-editor (cons "squash" args))))))
+
+(defun majutsu-squash--fileset-revsets-from-args (args)
+  "Return source revsets whose changed files are valid squash candidates."
+  (let (revision froms)
+    (dolist (arg args)
+      (when (stringp arg)
+        (cond
+         ((string-prefix-p "--revision=" arg)
+          (setq revision (substring arg 11)))
+         ((string-prefix-p "--from=" arg)
+          (push (substring arg 7) froms)))))
+    (cond
+     (revision (list revision))
+     (froms (nreverse froms))
+     ((magit-section-value-if 'jj-commit)
+      (list (magit-section-value-if 'jj-commit)))
+     (t '("@")))))
+
+(defun majutsu-squash--changed-files (revsets)
+  "Return the de-duplicated list of changed files for REVSETS."
+  (let (files)
+    (dolist (revset revsets)
+      (dolist (file (majutsu-file-changed-list revset))
+        (unless (member file files)
+          (setq files (append files (list file))))))
+    files))
+
+(defun majutsu-squash--read-files (prompt initial-input history)
+  "Read squash files with completion limited to source changed files."
+  (let* ((args (if (eq transient-current-command 'majutsu-squash)
+                   (transient-args 'majutsu-squash)
+                 '()))
+         (revsets (majutsu-squash--fileset-revsets-from-args args)))
+    (majutsu-read-files
+     prompt initial-input history
+     (lambda ()
+       (majutsu-squash--changed-files revsets)))))
 
 ;;;###autoload
 (defun majutsu-file-squash ()
@@ -203,7 +291,7 @@ a jj-commit section, add --revision from that section."
   :key "--"
   :argument "--"
   :prompt "Limit to file,s: "
-  :reader #'majutsu-read-files
+  :reader #'majutsu-squash--read-files
   :multi-value t)
 
 ;;;; Prefix
@@ -242,6 +330,7 @@ a jj-commit section, add --revision from that section."
    ["Paths" :if-not majutsu-interactive-selection-available-p
     (majutsu-squash:--)]
    ["Options"
+    ("-i" "Interactive" "--interactive")
     ("-k" "Keep emptied commit" "-k")
     (majutsu-transient-arg-ignore-immutable)]
    ["Actions"
@@ -253,7 +342,7 @@ a jj-commit section, add --revision from that section."
    'majutsu-squash nil nil
    :scope
    (majutsu-selection-session-begin)
-   :value (or (majutsu-squash--default-args) '())))
+   :value (majutsu-squash--initial-args)))
 
 ;;; _
 (provide 'majutsu-squash)

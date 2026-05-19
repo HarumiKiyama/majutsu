@@ -1376,6 +1376,21 @@ When IDS contains a single element, return it without prompting."
               (choice (completing-read prompt (mapcar #'car candidates) nil t)))
          (cdr (assoc choice candidates)))))))
 
+(defun majutsu-log--visible-change-candidates ()
+  "Return completion candidates for visible log entries."
+  (mapcar (lambda (entry)
+            (let ((id (majutsu-log--entry-id entry)))
+              (cons (majutsu-log--format-related-candidate id) id)))
+          majutsu-log--cached-entries))
+
+(defun majutsu-log--read-visible-change-id (prompt)
+  "Read a visible change id using PROMPT."
+  (let ((candidates (majutsu-log--visible-change-candidates)))
+    (unless candidates
+      (user-error "No visible changes in the current log"))
+    (let ((choice (completing-read prompt (mapcar #'car candidates) nil t)))
+      (cdr (assoc choice candidates)))))
+
 (defun majutsu-log--goto-related (ids prompt empty-message)
   "Jump to one of IDS using PROMPT, or signal EMPTY-MESSAGE."
   (if-let* ((target-id (majutsu-log--read-related-id ids prompt)))
@@ -1825,7 +1840,7 @@ If diff has not been loaded, fetch it via `jj diff --git' first."
   (interactive)
   (let ((section (magit-current-section)))
     (when (and section (eq (oref section type) 'jj-file))
-      (if (and (derived-mode-p 'majutsu-log-mode)
+      (if (and (derived-mode-p 'majutsu-mode)
                (not (oref section children))
                (majutsu-file--load-diff section))
           (majutsu-section-show section)
@@ -1890,6 +1905,15 @@ child to visit."
      (majutsu-log--visible-child-ids entry)
      "Go to child: "
      "No child revisions visible in the current log")))
+
+(defun majutsu-log-jump-to-change (&optional change-id)
+  "Jump to a visible changeset by CHANGE-ID."
+  (interactive (list (majutsu-log--read-visible-change-id "Jump to change: ")))
+  (majutsu--assert-mode 'majutsu-log-mode)
+  (unless change-id
+    (setq change-id (majutsu-log--read-visible-change-id "Jump to change: ")))
+  (unless (majutsu--goto-log-entry change-id)
+    (user-error "Revision %s is not visible in the current log" change-id)))
 
 (defun majutsu-goto-commit (commit-id)
   "Jump to a specific COMMIT-ID in the log."
@@ -1977,6 +2001,7 @@ Return non-nil when the section could be located."
   :parent majutsu-mode-map
   "n" 'majutsu-goto-next-changeset
   "p" 'majutsu-goto-prev-changeset
+  "j" 'majutsu-log-jump-to-change
   "[" 'majutsu-log-goto-parent
   "]" 'majutsu-log-goto-child
   "O" 'majutsu-new-dwim

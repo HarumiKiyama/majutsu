@@ -13,6 +13,14 @@
 (require 'ert)
 (require 'majutsu-interactive)
 
+(defun majutsu-interactive-test--faces-in-region (beg end)
+  "Return overlay faces between BEG and END."
+  (let (faces)
+    (dolist (ov (overlays-in beg end))
+      (when-let* ((face (overlay-get ov 'face)))
+        (push face faces)))
+    faces))
+
 (ert-deftest majutsu-interactive--build-tool-config/strips-tramp-prefix ()
   "Tool config should pass local remote paths to jj merge-tool args."
   (let ((config
@@ -72,6 +80,86 @@
         (let ((remote (majutsu-interactive--temp-dir)))
           (should (not (equal local remote)))
           (should (equal (length seen) 2)))))))
+
+(ert-deftest majutsu-interactive-toggle-hunk/marks-header-not-body ()
+  "Whole-hunk selection should mark the hunk header without recoloring its body."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let (file-section hunk-section)
+      (magit-insert-section (jj-file "src/a.el" nil)
+        (magit-insert-heading "M src/a.el")
+        (setq file-section magit-insert-section--current)
+        (magit-insert-section (jj-hunk '("src/a.el" 1) nil)
+          (magit-insert-heading "@@ -1 +1 @@")
+          (setq hunk-section magit-insert-section--current)
+          (insert "-old\n+new\n")))
+      (goto-char (oref hunk-section start))
+      (majutsu-interactive-toggle-hunk)
+      (should (seq-some (lambda (ov)
+                          (string-match-p "\\[x\\]"
+                                          (or (overlay-get ov 'before-string) "")))
+                        (overlays-at (oref hunk-section start))))
+      (should-not (memq 'majutsu-interactive-selected-hunk
+                        (majutsu-interactive-test--faces-in-region
+                         (oref hunk-section content)
+                         (oref hunk-section end))))
+      (should (seq-some (lambda (ov)
+                          (string-match-p "\\[~\\]"
+                                          (or (overlay-get ov 'before-string) "")))
+                        (overlays-at (oref file-section start)))))))
+
+(ert-deftest majutsu-interactive--build-file-patch/renamed-hunk-only-omits-rename ()
+  "Hunk-only selection in a renamed file should not move the rename metadata."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let* ((header (string-join
+                    '("diff --git a/old.txt b/new.txt"
+                      "similarity index 88%"
+                      "rename from old.txt"
+                      "rename to new.txt"
+                      "--- a/old.txt"
+                      "+++ b/new.txt"
+                      "")
+                    "\n"))
+           file-section
+           hunk-section)
+      (magit-insert-section (jj-file "new.txt" nil :header header)
+        (magit-insert-heading "R old.txt => new.txt")
+        (setq file-section magit-insert-section--current)
+        (magit-insert-section (jj-hunk '("new.txt" 1) nil)
+          (magit-insert-heading "@@ -1 +1 @@")
+          (setq hunk-section magit-insert-section--current)
+          (insert "-old\n+new\n")))
+      (let ((patch (majutsu-interactive--build-file-patch
+                    file-section
+                    (list (list hunk-section :all)))))
+        (should (string-prefix-p "diff --git a/old.txt b/old.txt\n" patch))
+        (should (string-match-p "^--- a/old\\.txt$" patch))
+        (should (string-match-p "^+++ b/old\\.txt$" patch))
+        (should-not (string-match-p "^rename from " patch))
+        (should-not (string-match-p "^rename to " patch))))))
+
+(ert-deftest majutsu-interactive--build-patch/pure-rename-file-selection ()
+  "A file-level selection should support pure rename patches without hunks."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let ((header (string-join
+                   '("diff --git a/old.txt b/new.txt"
+                     "similarity index 100%"
+                     "rename from old.txt"
+                     "rename to new.txt"
+                     "")
+                   "\n"))
+          file-section)
+      (magit-insert-section (jj-file "new.txt" nil :header header)
+        (magit-insert-heading "R old.txt => new.txt")
+        (setq file-section magit-insert-section--current))
+      (majutsu-interactive--set-file-selection file-section t)
+      (should (equal (majutsu-interactive--build-patch)
+                     header)))))
 
 (provide 'majutsu-interactive-test)
 ;;; majutsu-interactive-test.el ends here

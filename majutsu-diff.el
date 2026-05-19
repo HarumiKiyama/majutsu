@@ -517,6 +517,28 @@ ARGS are the diff arguments used to produce DIFF-OUTPUT."
       (magit-insert-heading (format "jj %s" (string-join args " ")))
       (majutsu-jj-wash washer 'wash-anyway args))))
 
+(defun majutsu-diff--summary-file (line)
+  "Return changed file path parsed from summary LINE."
+  (when (string-match "\\`[^[:space:]]+\\s-+\\(.+\\)\\'" line)
+    (match-string 1 line)))
+
+(defun majutsu-diff-insert-file-list ()
+  "Insert a lazy list of changed files for the current diff range."
+  (let* ((args (append '("diff" "--summary")
+                       majutsu-buffer-diff-range
+                       majutsu-buffer-diff-filesets))
+         (summary (majutsu--with-no-color
+                    (apply #'majutsu-jj-string args)))
+         (lines (and summary
+                     (seq-remove #'string-empty-p
+                                 (split-string summary "\n")))))
+    (magit-insert-section (diff-root)
+      (magit-insert-heading (format "jj %s" (string-join args " ")))
+      (dolist (line lines)
+        (when-let* ((file (majutsu-diff--summary-file line)))
+          (magit-insert-section (jj-file file nil :diff-range majutsu-buffer-diff-range)
+            (magit-insert-heading line)))))))
+
 ;;; Diff wash
 
 (defun majutsu-diff-wash-diffstat ()
@@ -1360,7 +1382,9 @@ With prefix STYLE, cycle between `all' and `t'."
       (unless (eq backend 'color-words)
         (majutsu-diff--set-left-margin 0))
       (magit-insert-section (diffbuf)
-        (magit-run-section-hook 'majutsu-diff-sections-hook))
+        (if majutsu-buffer-diff-file-list-p
+            (majutsu-diff-insert-file-list)
+          (magit-run-section-hook 'majutsu-diff-sections-hook)))
       (when (eq majutsu-diff-refine-hunk 'all)
         (majutsu-diff--update-hunk-refinement)))))
 
@@ -1400,6 +1424,17 @@ REVSET is passed to jj diff using `--revisions='."
                    (majutsu-buffer-diff-args args)
                    (majutsu-buffer-diff-range range)
                    (majutsu-buffer-diff-filesets filesets))))
+    (with-current-buffer buffer
+      (majutsu-diff--sync-backend majutsu-buffer-diff-args))
+    buffer))
+
+(defun majutsu-diff-setup-file-list-buffer (range filesets &optional locked)
+  "Display a lazy file-list diff buffer configured by RANGE and FILESETS."
+  (let ((buffer (majutsu-setup-buffer #'majutsu-diff-mode locked
+                  (majutsu-buffer-diff-args '("--summary"))
+                  (majutsu-buffer-diff-range range)
+                  (majutsu-buffer-diff-filesets filesets)
+                  (majutsu-buffer-diff-file-list-p t))))
     (with-current-buffer buffer
       (majutsu-diff--sync-backend majutsu-buffer-diff-args))
     buffer))

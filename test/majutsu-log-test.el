@@ -882,6 +882,49 @@
         (majutsu-log-goto-child))
       (should (equal (magit-section-value-if 'jj-commit) "child-b")))))
 
+(ert-deftest majutsu-log-mode-map-has-jump-binding ()
+  "`j' should jump to a visible change in `majutsu-log-mode'."
+  (should (eq (lookup-key majutsu-log-mode-map (kbd "j"))
+              #'majutsu-log-jump-to-change)))
+
+(ert-deftest majutsu-log-jump-to-change-prompts-and-jumps ()
+  "Jump command should complete visible log entries and move to the selected one."
+  (let* ((compiled (majutsu-log-test--relations-compiled))
+         (raw (concat (majutsu-log-test--raw-entry "change-a" "First change")
+                      (majutsu-log-test--raw-entry "change-b" "Second change")))
+         (majutsu--default-directory "/tmp/test-repo/")
+         (majutsu-log--compiled-template-cache compiled)
+         seen-prompt
+         seen-candidates)
+    (with-temp-buffer
+      (require 'magit-section)
+      (majutsu-log-mode)
+      (setq buffer-read-only nil)
+      (magit-insert-section (lograph)
+        (insert raw)
+        (goto-char (point-min))
+        (majutsu-log--wash-logs nil))
+      (should (majutsu--goto-log-entry "change-a"))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (prompt candidates &rest _)
+                   (setq seen-prompt prompt
+                         seen-candidates candidates)
+                   (seq-find (lambda (candidate)
+                               (string-match-p "change-b" candidate))
+                             candidates))))
+        (majutsu-log-jump-to-change))
+      (should (equal (magit-section-value-if 'jj-commit) "change-b"))
+      (should (equal seen-prompt "Jump to change: "))
+      (should (equal seen-candidates
+                     '("change-a  First change" "change-b  Second change"))))))
+
+(ert-deftest majutsu-log-jump-to-change-errors-without-visible-changes ()
+  "Jump command should error when the current log has no visible entries."
+  (with-temp-buffer
+    (require 'magit-section)
+    (majutsu-log-mode)
+    (should-error (majutsu-log-jump-to-change) :type 'user-error)))
+
 (ert-deftest majutsu-log-apply-face-policy-modes ()
   "Face policy should support preserve, strip, and override."
   (let* ((raw (propertize "x" 'font-lock-face 'error))

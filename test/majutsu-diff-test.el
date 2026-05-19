@@ -112,6 +112,33 @@
     (should (equal majutsu-buffer-diff-filesets '("a" "b")))
     (should (equal majutsu-buffer-diff-args '("--summary")))))
 
+(ert-deftest majutsu-diff-insert-file-list-creates-lazy-file-sections ()
+  "Split selection buffers should initially show files without loading hunks."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          (magit-section-inhibit-markers t)
+          (majutsu-buffer-diff-range '("--revisions=abc"))
+          (majutsu-buffer-diff-filesets nil))
+      (cl-letf (((symbol-function 'majutsu-jj-string)
+                 (lambda (&rest args)
+                   (should (equal args '("diff" "--summary" "--revisions=abc")))
+                   "M src/a.el\nA docs/readme.org\n")))
+        (magit-insert-section (diffbuf)
+          (majutsu-diff-insert-file-list)))
+      (let* ((root (car (oref magit-root-section children)))
+             (files (seq-filter (lambda (child)
+                                  (eq (oref child type) 'jj-file))
+                                (oref root children))))
+        (should (= (length files) 2))
+        (should (equal (mapcar (lambda (section) (oref section value)) files)
+                       '("src/a.el" "docs/readme.org")))
+        (should-not (seq-some (lambda (file)
+                                (seq-some (lambda (child)
+                                            (eq (oref child type) 'jj-hunk))
+                                          (oref file children)))
+                              files))))))
+
 (ert-deftest majutsu-diff-revset-falls-back-to-default-args-when-nil ()
   "`majutsu-diff-revset' should use default formatting args when ARGS is nil."
   (let (captured-args

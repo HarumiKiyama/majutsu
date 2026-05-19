@@ -566,6 +566,9 @@ When nil, jj's default range (\"-r @\") is used.")
 (defvar-local majutsu-buffer-diff-filesets nil
   "Filesets filter for current diff buffer.")
 
+(defvar-local majutsu-buffer-diff-file-list-p nil
+  "Whether current diff buffer should show a lazy file list instead of full diff.")
+
 ;;; Display functions
 
 ;;; _
