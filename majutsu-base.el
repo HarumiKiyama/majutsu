@@ -118,7 +118,10 @@ for a class of actions that would normally ask for confirmation."
   ((keymap :initform 'majutsu-file-section-map)
    (header :initarg :header
            :initform nil
-           :documentation "Raw file header text (diff --git + extended headers).")))
+           :documentation "Raw file header text (diff --git + extended headers).")
+   (diff-range :initarg :diff-range
+               :initform nil
+               :documentation "Range arguments used when loading this file's diff.")))
 
 (defclass majutsu-hunk-section (majutsu-diff-section)
   ((keymap :initform 'majutsu-hunk-section-map)

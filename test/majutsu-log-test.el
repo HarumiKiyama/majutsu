@@ -1105,10 +1105,93 @@
                                        'invisible))
         (should (= (how-many "^diff --git " (point-min) (point-max)) 0))))))
 
+(ert-deftest majutsu-log-toggle-change-files-loads-once-and-cycles-visibility ()
+  "F on a commit loads changed files once, then collapses and re-expands them."
+  (with-temp-buffer
+    (require 'magit-section)
+    (majutsu-log-mode)
+    (setq buffer-read-only nil)
+    (let ((calls 0)
+          commit-section files-section)
+      (cl-letf (((symbol-function 'majutsu-jj-string)
+                 (lambda (&rest args)
+                   (should (equal args '("diff" "--summary" "--revisions=change-a")))
+                   (cl-incf calls)
+                   "M src/a.el\nA docs/readme.org\n")))
+        (magit-insert-section (jj-commit "change-a" t)
+          (magit-insert-heading "change-a Add files"))
+        (goto-char (point-min))
+        (setq commit-section (magit-current-section))
+
+        (majutsu-log-toggle-change-files)
+        (should (= calls 1))
+        (should-not (oref commit-section hidden))
+        (setq files-section
+              (seq-find (lambda (child)
+                          (eq (oref child type) 'changed-files))
+                        (oref commit-section children)))
+        (should files-section)
+        (should-not (oref files-section hidden))
+        (should (= (length (oref files-section children)) 2))
+        (should (equal (mapcar (lambda (child) (oref child value))
+                               (oref files-section children))
+                       '("src/a.el" "docs/readme.org")))
+        (goto-char (oref commit-section start))
+        (majutsu-log-toggle-change-files)
+        (should (= calls 1))
+        (should (oref files-section hidden))
+        (goto-char (oref commit-section start))
+        (majutsu-log-toggle-change-files)
+        (should (= calls 1))
+        (should-not (oref files-section hidden))))))
+
+(ert-deftest majutsu-file-toggle-diff-uses-log-change-revision-context ()
+  "TAB on a log change file loads that file's diff for the parent revision."
+  (with-temp-buffer
+    (require 'magit-section)
+    (majutsu-log-mode)
+    (setq buffer-read-only nil)
+    (let ((calls 0)
+          (diff (string-join
+                 '("diff --git a/src/a.el b/src/a.el"
+                   "index 1234567..89abcde 100644"
+                   "--- a/src/a.el"
+                   "+++ b/src/a.el"
+                   "@@ -1 +1 @@"
+                   "-old"
+                   "+new")
+                 "\n"))
+          file-section)
+      (cl-letf (((symbol-function 'majutsu-jj-insert)
+                 (lambda (&rest args)
+                   (should (equal args '("diff" "--git" "--revisions=change-a" "--" "src/a.el")))
+                   (cl-incf calls)
+                   (insert diff)
+                   0)))
+        (magit-insert-section (jj-commit "change-a" t)
+          (magit-insert-heading "change-a Add files")
+          (magit-insert-section (changed-files "change-a")
+            (magit-insert-heading "Changed files")
+            (magit-insert-section (jj-file "src/a.el" nil :diff-range '("--revisions=change-a"))
+              (magit-insert-heading "M src/a.el"))))
+        (goto-char (point-min))
+        (search-forward "M src/a.el")
+        (setq file-section (magit-current-section))
+        (majutsu-file-toggle-diff)
+        (should (= calls 1))
+        (should-not (oref file-section hidden))
+        (should (= (length (oref file-section children)) 1))
+        (should (eq (oref (car (oref file-section children)) type) 'jj-hunk))))))
+
 (ert-deftest majutsu-file-section-map-has-tab-binding ()
   "`TAB' should be bound to `majutsu-file-toggle-diff' in file section map."
   (should (eq (lookup-key majutsu-file-section-map (kbd "TAB"))
               #'majutsu-file-toggle-diff)))
+
+(ert-deftest majutsu-commit-section-map-has-change-files-binding ()
+  "`F' should be bound to `majutsu-log-toggle-change-files' in commit sections."
+  (should (eq (lookup-key majutsu-commit-section-map "F")
+              #'majutsu-log-toggle-change-files)))
 
 (ert-deftest majutsu-hunk-section-map-has-discard-binding ()
   "`k' should be bound to `majutsu-hunk-discard' in hunk section map."

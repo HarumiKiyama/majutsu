@@ -158,6 +158,9 @@ The log buffer is the heart of Majutsu. It displays the history graph using a cu
 *** Log Display
 Each revision in the log is a section. The visible anchor line is built from fields assigned to the ~heading~ module plus any auxiliary fields assigned to the ~tail~ module in ~majutsu-log-commit-columns~ (for example, author and timestamp). Graph prefixes and graph-related indentation are rendered as display-only prefix decoration rather than real buffer text, so they do not get copied accidentally and point does not land on them as editable text. Collapsed by default, you can expand a revision to see foldable ~body~ module content (for example, long descriptions).
 
+- Key: F (majutsu-log-toggle-change-files) :: Toggle an inline list of files changed by the revision at point.
+- Key: TAB on a changed file :: Load and toggle that file's inline diff hunks for the parent revision.
+
 *** Log Options Transient
 - Key: l (majutsu-log-transient) ::
   Open the log options transient.

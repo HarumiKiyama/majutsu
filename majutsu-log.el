@@ -20,6 +20,7 @@
 
 (require 'majutsu)
 (require 'magit-log)
+(require 'seq)
 
 ;;; Faces
 
@@ -33,6 +34,7 @@
 (defvar-keymap majutsu-commit-section-map
   :doc "Keymap for `jj-commit' sections."
   "<remap> <majutsu-visit-thing>" #'majutsu-edit-changeset
+  "F" #'majutsu-log-toggle-change-files
   "f" #'majutsu-commit-visit-blob)
 
 ;;; Log State
@@ -1696,15 +1698,90 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
     (magit-insert-heading "Working Copy Status")
     (majutsu-jj-wash #'majutsu-log--wash-status nil "status")))
 
+(defun majutsu-log--change-files-section (commit-section)
+  "Return COMMIT-SECTION's changed-files child, if any."
+  (seq-find (lambda (child)
+              (eq (oref child type) 'changed-files))
+            (oref commit-section children)))
+
+(defun majutsu-log--summary-file (line)
+  "Return changed file path parsed from summary LINE."
+  (when (string-match "\\`[^[:space:]]+\\s-+\\(.+\\)\\'" line)
+    (match-string 1 line)))
+
+(defun majutsu-log--commit-section-at-point ()
+  "Return the enclosing `jj-commit' section at point."
+  (let ((section (magit-current-section)))
+    (while (and section
+                (not (eq section magit-root-section))
+                (not (eq (oref section type) 'jj-commit)))
+      (setq section (oref section parent)))
+    (and section
+         (eq (oref section type) 'jj-commit)
+         section)))
+
+(defun majutsu-log--load-change-files (commit-section)
+  "Load changed file sections for COMMIT-SECTION."
+  (let* ((rev (oref commit-section value))
+         (range (list (concat "--revisions=" rev)))
+         (summary (majutsu--with-no-color
+                    (majutsu-jj-string "diff" "--summary" (car range))))
+         (lines (and summary
+                     (seq-remove #'string-empty-p
+                                 (split-string summary "\n"))))
+         (inhibit-read-only t)
+         (magit-insert-section--parent commit-section)
+         (magit-insert-section--current nil)
+         (magit-insert-section--oldroot nil))
+    (when lines
+      (save-excursion
+        (goto-char (oref commit-section end))
+        (let ((beg (point)))
+          (magit-insert-section (changed-files rev)
+            (magit-insert-heading "Changed files")
+            (dolist (line lines)
+              (when-let* ((file (majutsu-log--summary-file line)))
+                (magit-insert-section (jj-file file nil :diff-range range)
+                  (magit-insert-heading line)))))
+          (when (or (null (oref commit-section content))
+                    (= (oref commit-section content) (oref commit-section end)))
+            (if (markerp (oref commit-section content))
+                (set-marker (oref commit-section content) beg)
+              (oset commit-section content (copy-marker beg))))
+          (set-marker (oref commit-section end) (point)))))
+    (majutsu-log--change-files-section commit-section)))
+
+(defun majutsu-log-toggle-change-files ()
+  "Toggle inline changed files for the commit at point."
+  (interactive)
+  (let* ((commit-section (or (majutsu-log--commit-section-at-point)
+                             (user-error "No changeset at point")))
+         (files-section (or (majutsu-log--change-files-section commit-section)
+                            (majutsu-log--load-change-files commit-section))))
+    (unless files-section
+      (user-error "No changed files for this changeset"))
+    (if (oref files-section hidden)
+        (progn
+          (majutsu-section-show commit-section)
+          (majutsu-section-show files-section))
+      (if (and (oref commit-section hidden)
+               (not (oref files-section hidden)))
+          (majutsu-section-show commit-section)
+        (majutsu-section-hide files-section)))))
+
 (defun majutsu-file--load-diff (section)
   "Load diff content for the `jj-file' SECTION.
 Runs `jj diff --git' for the file and inserts hunks as children."
   (let ((file (oref section value)))
     (when file
-      (let ((output (majutsu--with-no-color
-                      (with-temp-buffer
-                        (majutsu-jj-insert "diff" "--git" file)
-                        (buffer-string)))))
+      (let* ((range (oref section diff-range))
+             (args (append '("diff" "--git")
+                           range
+                           (if range (list "--" file) (list file))))
+             (output (majutsu--with-no-color
+                       (with-temp-buffer
+                         (apply #'majutsu-jj-insert args)
+                         (buffer-string)))))
         (when (and output (not (string-empty-p output)))
           (let ((header (with-temp-buffer
                           (insert output)
