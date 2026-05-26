@@ -12,6 +12,13 @@
 (require 'cl-lib)
 (require 'majutsu-split)
 
+(ert-deftest majutsu-split-transient/selection-hides-toggle-at-point-suffixes ()
+  "Split transient should not show duplicate no-dash selection toggles."
+  (dolist (key '("r" "o" "a" "b"))
+    (should-error (transient-get-suffix 'majutsu-split key)))
+  (dolist (key '("-r" "-o" "-A" "-B"))
+    (should (transient-get-suffix 'majutsu-split key))))
+
 (ert-deftest majutsu-split-execute-normalizes-fileset-args ()
   "Move placement options before fileset delimiter for direct split."
   (let (called)
@@ -136,6 +143,45 @@
                      '("src/a.el")))
       (should (equal seen-rev "abc"))
       (should (equal seen-collection '("src/a.el" "test/a-test.el"))))))
+
+(ert-deftest majutsu-file-split/uses-region-file-sections ()
+  "File-level split should split all jj-file sections in the active region."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          section-a section-b
+          pos-a pos-b
+          called)
+      (magit-insert-section (status)
+        (magit-insert-section (jj-file "a.el")
+          (setq section-a (magit-current-section))
+          (magit-insert-heading "M a.el"))
+        (magit-insert-section (jj-file "b.el" nil
+                                       :operation-fileset "file:\"old.el\"|file:\"b.el\"")
+          (setq section-b (magit-current-section))
+          (magit-insert-heading "R {old.el => b.el}")))
+      (goto-char (point-min))
+      (search-forward "M a.el")
+      (setq pos-a (line-beginning-position))
+      (search-forward "R {old.el => b.el}")
+      (setq pos-b (line-beginning-position))
+      (setq-local transient-mark-mode t)
+      (goto-char pos-b)
+      (push-mark pos-a t t)
+      (cl-letf (((symbol-function 'majutsu-run-jj-with-editor)
+                 (lambda (args)
+                   (setq called args)
+                   0)))
+        (majutsu-file-split))
+      (should (equal called
+                     '("split" "--"
+                       "file:\"a.el\""
+                       "file:\"old.el\"|file:\"b.el\""))))))
+
+(ert-deftest majutsu-file-section-map-has-split-binding ()
+  "`S' should be bound to `majutsu-file-split' in file section map."
+  (should (eq (lookup-key majutsu-file-section-map "S")
+              #'majutsu-file-split)))
 
 (provide 'majutsu-split-test)
 ;;; majutsu-split-test.el ends here

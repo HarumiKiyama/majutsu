@@ -158,13 +158,23 @@ a jj-commit section, add --revision from that section."
 
 ;;;###autoload
 (defun majutsu-file-squash ()
-  "Squash changes from the file at point into the parent commit."
+  "Squash changes from the file at point or active file region."
   (interactive)
-  (let ((file (majutsu-file-at-point)))
-    (unless file
+  (let* ((sections (majutsu-file-sections-at-point-or-region))
+         (filesets (mapcar #'majutsu-file-section-fileset sections))
+         (count (length filesets))
+         (prompt (if (= count 1)
+                     (format "Squash %s? " (oref (car sections) value))
+                   (format "Squash %d files? " count))))
+    (unless filesets
       (user-error "No file at point"))
-    (when (yes-or-no-p (format "Squash %s? " file))
-      (majutsu-run-jj "squash" (majutsu-jj-fileset-quote file)))))
+    (when (yes-or-no-p prompt)
+      (apply #'majutsu-run-jj
+             (append (list "squash")
+                     (if (= count 1)
+                         filesets
+                       (cons "--" filesets))))
+      (deactivate-mark))))
 
 ;;;###autoload
 (defun majutsu-hunk-squash ()
@@ -315,12 +325,6 @@ a jj-commit section, add --revision from that section."
     (majutsu-squash:--onto)
     (majutsu-squash:--insert-after)
     (majutsu-squash:--insert-before)
-    (majutsu-squash:revision)
-    (majutsu-squash:from)
-    (majutsu-squash:into)
-    (majutsu-squash:onto)
-    (majutsu-squash:insert-after)
-    (majutsu-squash:insert-before)
     ("c" "Clear selections" majutsu-selection-clear :transient t)]
    ["Patch Selection" :if majutsu-interactive-selection-available-p
     (majutsu-interactive:select-hunk)

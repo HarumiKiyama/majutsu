@@ -1688,22 +1688,27 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
           (while (and (< (point) end)
                       (not (looking-at-p "^\\s-*$"))
                       (not (looking-at-p "^\\(?:Working copy\\|Parent commit\\|Conflicts\\)")))
-            (when (looking-at "^\\([MAD?]\\)\\s-+\\(.+\\)$")
+            (when-let* ((info (majutsu-jj-summary-line-info
+                               (buffer-substring-no-properties
+                                (line-beginning-position) (line-end-position)))))
               (push (list (line-beginning-position)
                           (save-excursion (forward-line 1) (point))
-                          (match-string-no-properties 2))
+                          info)
                     regions))
             (forward-line 1))
           ;; Second pass: replace file lines with jj-file sections (bottom to top)
           (dolist (region regions)
             (let* ((beg (nth 0 region))
                    (after-line (nth 1 region))
-                   (file (nth 2 region)))
+                   (info (nth 2 region))
+                   (file (plist-get info :path))
+                   (operation-fileset (plist-get info :operation-fileset)))
               (goto-char beg)
               (let ((line (buffer-substring-no-properties
                            (line-beginning-position) (line-end-position))))
                 (delete-region beg after-line)
-                (magit-insert-section (jj-file file)
+                (magit-insert-section (jj-file file nil
+                                               :operation-fileset operation-fileset)
                   (magit-insert-heading line))))))))
     (goto-char (point-max))))
 
@@ -1721,8 +1726,7 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
 
 (defun majutsu-log--summary-file (line)
   "Return changed file path parsed from summary LINE."
-  (when (string-match "\\`[^[:space:]]+\\s-+\\(.+\\)\\'" line)
-    (match-string 1 line)))
+  (plist-get (majutsu-jj-summary-line-info line) :path))
 
 (defun majutsu-log--commit-section-at-point ()
   "Return the enclosing `jj-commit' section at point."
@@ -1755,8 +1759,12 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
           (magit-insert-section (changed-files rev)
             (magit-insert-heading "Changed files")
             (dolist (line lines)
-              (when-let* ((file (majutsu-log--summary-file line)))
-                (magit-insert-section (jj-file file nil :diff-range range)
+              (when-let* ((info (majutsu-jj-summary-line-info line))
+                          (file (plist-get info :path)))
+                (magit-insert-section (jj-file file nil
+                                               :diff-range range
+                                               :operation-fileset
+                                               (plist-get info :operation-fileset))
                   (magit-insert-heading line)))))
           (when (or (null (oref commit-section content))
                     (= (oref commit-section content) (oref commit-section end)))

@@ -165,17 +165,11 @@ ARGS are passed from the transient."
    ["Source"
     (majutsu-rebase:--source)
     (majutsu-rebase:--branch)
-    (majutsu-rebase:--revisions)
-    (majutsu-rebase:source)
-    (majutsu-rebase:branch)
-    (majutsu-rebase:revisions)]
+    (majutsu-rebase:--revisions)]
    ["Destination"
     (majutsu-rebase:--onto)
     (majutsu-rebase:--after)
     (majutsu-rebase:--before)
-    (majutsu-rebase:onto)
-    (majutsu-rebase:after)
-    (majutsu-rebase:before)
     ("c" "Clear selections" majutsu-selection-clear
      :transient t)]
    ["Options"

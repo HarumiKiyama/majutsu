@@ -139,6 +139,32 @@
                                           (oref file children)))
                               files))))))
 
+(ert-deftest majutsu-diff-insert-file-list-parses-rename-summary ()
+  "Rename summaries should use destination paths for lazy file sections."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          (magit-section-inhibit-markers t)
+          (majutsu-buffer-diff-range '("--revisions=abc"))
+          (majutsu-buffer-diff-filesets nil))
+      (cl-letf (((symbol-function 'majutsu-jj-string)
+                 (lambda (&rest args)
+                   (should (equal args '("diff" "--summary" "--revisions=abc")))
+                   "R {old.txt => new.txt}\n")))
+        (magit-insert-section (diffbuf)
+          (majutsu-diff-insert-file-list)))
+      (let* ((root (car (oref magit-root-section children)))
+             (file (seq-find (lambda (child)
+                               (eq (oref child type) 'jj-file))
+                             (oref root children))))
+        (should file)
+        (should (equal (oref file value) "new.txt"))
+        (should (equal (oref file operation-fileset)
+                       "file:\"old.txt\"|file:\"new.txt\""))
+        (should (string-match-p "R {old.txt => new.txt}"
+                                (buffer-substring-no-properties
+                                 (oref file start) (oref file end))))))))
+
 (ert-deftest majutsu-diff-revset-falls-back-to-default-args-when-nil ()
   "`majutsu-diff-revset' should use default formatting args when ARGS is nil."
   (let (captured-args

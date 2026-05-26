@@ -519,8 +519,7 @@ ARGS are the diff arguments used to produce DIFF-OUTPUT."
 
 (defun majutsu-diff--summary-file (line)
   "Return changed file path parsed from summary LINE."
-  (when (string-match "\\`[^[:space:]]+\\s-+\\(.+\\)\\'" line)
-    (match-string 1 line)))
+  (plist-get (majutsu-jj-summary-line-info line) :path))
 
 (defun majutsu-diff-insert-file-list ()
   "Insert a lazy list of changed files for the current diff range."
@@ -535,8 +534,12 @@ ARGS are the diff arguments used to produce DIFF-OUTPUT."
     (magit-insert-section (diff-root)
       (magit-insert-heading (format "jj %s" (string-join args " ")))
       (dolist (line lines)
-        (when-let* ((file (majutsu-diff--summary-file line)))
-          (magit-insert-section (jj-file file nil :diff-range majutsu-buffer-diff-range)
+        (when-let* ((info (majutsu-jj-summary-line-info line))
+                    (file (plist-get info :path)))
+          (magit-insert-section (jj-file file nil
+                                         :diff-range majutsu-buffer-diff-range
+                                         :operation-fileset
+                                         (plist-get info :operation-fileset))
             (magit-insert-heading line)))))))
 
 ;;; Diff wash
@@ -1284,7 +1287,8 @@ what the diff is about."
   "k" #'majutsu-restore-file-at-point
   "a" #'majutsu-file-absorb
   "b" #'majutsu-file-visit-blob
-  "s" #'majutsu-file-squash)
+  "s" #'majutsu-file-squash
+  "S" #'majutsu-file-split)
 
 (defvar-keymap majutsu-hunk-section-map
   :doc "Keymap for `jj-hunk' sections."

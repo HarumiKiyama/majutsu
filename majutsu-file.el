@@ -77,6 +77,59 @@
 (defvar-local majutsu-blob-edit--saved-blob-mode-enabled nil
   "Whether `majutsu-blob-mode' was enabled before entering editable mode.")
 
+(defun majutsu-file-section-fileset (section)
+  "Return the jj fileset for jj-file SECTION."
+  (let ((operation-fileset (and (cl-typep section 'majutsu-file-section)
+                                (oref section operation-fileset)))
+        (file (and (magit-section-match 'jj-file section)
+                   (oref section value))))
+    (unless file
+      (user-error "No file section at point"))
+    (or operation-fileset
+        (majutsu-jj-fileset-quote file))))
+
+(defun majutsu-file--section-in-region-p (section beg end)
+  "Return non-nil when SECTION intersects the region from BEG to END."
+  (let ((start (marker-position (oref section start)))
+        (finish (marker-position (oref section end)))
+        (rbeg (min beg end))
+        (rend (max beg end)))
+    (and start finish
+         (<= start rend)
+         (>= finish rbeg))))
+
+(defun majutsu-file--region-file-sections ()
+  "Return jj-file sections intersecting the active region."
+  (when (and mark-active (mark t) magit-root-section)
+    (let ((beg (region-beginning))
+          (end (region-end))
+          sections)
+      (magit-map-sections
+       (lambda (section)
+         (when (and (magit-section-match 'jj-file section)
+                    (majutsu-file--section-in-region-p section beg end))
+           (push section sections)))
+       magit-root-section)
+      (nreverse sections))))
+
+(defun majutsu-file-sections-at-point-or-region ()
+  "Return jj-file sections selected by region, or the file section at point."
+  (or (majutsu-file--region-file-sections)
+      (when-let* ((section (magit-current-section)))
+        (cond
+         ((magit-section-match 'jj-file section)
+          (list section))
+         ((and (oref section parent)
+               (magit-section-match 'jj-file (oref section parent)))
+          (list (oref section parent)))))))
+
+(defun majutsu-file-filesets-at-point-or-region ()
+  "Return jj filesets for file sections selected by region or point."
+  (let ((sections (majutsu-file-sections-at-point-or-region)))
+    (unless sections
+      (user-error "No file at point"))
+    (mapcar #'majutsu-file-section-fileset sections)))
+
 (defun majutsu-blob-edit--set-cursor-hint (cursor)
   "Set editable-mode cursor hint to CURSOR.
 When Evil is active, also update `evil-normal-state-cursor'."

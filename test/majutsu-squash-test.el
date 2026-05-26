@@ -12,6 +12,13 @@
 (require 'cl-lib)
 (require 'majutsu-squash)
 
+(ert-deftest majutsu-squash-transient/selection-hides-toggle-at-point-suffixes ()
+  "Squash transient should not show duplicate no-dash selection toggles."
+  (dolist (key '("r" "f" "t" "o" "a" "b"))
+    (should-error (transient-get-suffix 'majutsu-squash key)))
+  (dolist (key '("-r" "-f" "-t" "-o" "-A" "-B"))
+    (should (transient-get-suffix 'majutsu-squash key))))
+
 (ert-deftest majutsu-squash-arguments-normalizes-fileset-args ()
   "Move selection options before fileset delimiter."
   (let ((transient-current-command 'majutsu-squash))
@@ -130,6 +137,62 @@
       (should (equal (nreverse seen-revsets) '("abc" "def")))
       (should (equal seen-collection
                      '("src/a.el" "shared.el" "test/a-test.el"))))))
+
+(ert-deftest majutsu-file-squash/uses-operation-fileset ()
+  "File-level squash should honor a section-specific operation fileset."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          called)
+      (magit-insert-section (jj-file "new.txt" nil
+                                     :operation-fileset "file:\"old.txt\"|file:\"new.txt\"")
+        (magit-insert-heading "R {old.txt => new.txt}"))
+      (goto-char (point-min))
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'majutsu-run-jj)
+                 (lambda (&rest args)
+                   (setq called args)
+                   0)))
+        (majutsu-file-squash))
+      (should (equal called
+                     '("squash" "file:\"old.txt\"|file:\"new.txt\""))))))
+
+(ert-deftest majutsu-file-squash/uses-region-file-sections ()
+  "File-level squash should squash all jj-file sections in the active region."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          section-a section-b
+          pos-a pos-b
+          called)
+      (magit-insert-section (status)
+        (magit-insert-section (jj-file "a.el")
+          (setq section-a (magit-current-section))
+          (magit-insert-heading "M a.el"))
+        (magit-insert-section (jj-file "b.el" nil
+                                       :operation-fileset "file:\"old.el\"|file:\"b.el\"")
+          (setq section-b (magit-current-section))
+          (magit-insert-heading "R {old.el => b.el}")))
+      (goto-char (point-min))
+      (search-forward "M a.el")
+      (setq pos-a (line-beginning-position))
+      (search-forward "R {old.el => b.el}")
+      (setq pos-b (line-beginning-position))
+      (setq-local transient-mark-mode t)
+      (goto-char pos-b)
+      (push-mark pos-a t t)
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'majutsu-run-jj)
+                 (lambda (&rest args)
+                   (setq called args)
+                   0)))
+        (majutsu-file-squash))
+      (should (equal called
+                     '("squash" "--"
+                       "file:\"a.el\""
+                       "file:\"old.el\"|file:\"b.el\""))))))
 
 (provide 'majutsu-squash-test)
 ;;; majutsu-squash-test.el ends here

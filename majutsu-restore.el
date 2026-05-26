@@ -70,14 +70,24 @@ In diff buffer on a file section, restore only that file."
 
 ;;;###autoload
 (defun majutsu-restore-file-at-point ()
-  "Restore (discard) changes to the file at point.
-Point must be on a `jj-file' section."
+  "Restore (discard) changes to the file at point or active file region.
+Point or region must select `jj-file' sections."
   (interactive)
-  (let ((file (majutsu-file-at-point)))
-    (unless file
+  (let* ((sections (majutsu-file-sections-at-point-or-region))
+         (filesets (mapcar #'majutsu-file-section-fileset sections))
+         (count (length filesets))
+         (prompt (if (= count 1)
+                     (format "Discard changes to %s? " (oref (car sections) value))
+                   (format "Discard changes to %d files? " count))))
+    (unless filesets
       (user-error "No file at point"))
-    (when (yes-or-no-p (format "Discard changes to %s? " file))
-      (majutsu-run-jj "restore" (majutsu-jj-fileset-quote file)))))
+    (when (yes-or-no-p prompt)
+      (apply #'majutsu-run-jj
+             (append (list "restore")
+                     (if (= count 1)
+                         filesets
+                       (cons "--" filesets))))
+      (deactivate-mark))))
 
 ;;;###autoload
 (defun majutsu-hunk-discard ()

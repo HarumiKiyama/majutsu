@@ -19,6 +19,40 @@
 (require 'majutsu-file)
 (require 'majutsu-annotate)
 
+(ert-deftest majutsu-file-sections-at-point-or-region/collects-region-files ()
+  "Active region should collect jj-file sections in buffer order."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          section-a section-b section-c
+          pos-a pos-b)
+      (magit-insert-section (status)
+        (magit-insert-section (jj-file "a.el")
+          (setq section-a (magit-current-section))
+          (magit-insert-heading "M a.el"))
+        (magit-insert-section (jj-file "b.el" nil
+                                       :operation-fileset "file:\"old.el\"|file:\"b.el\"")
+          (setq section-b (magit-current-section))
+          (magit-insert-heading "R {old.el => b.el}"))
+        (magit-insert-section (jj-file "c.el")
+          (setq section-c (magit-current-section))
+          (magit-insert-heading "M c.el")))
+      (goto-char (point-min))
+      (search-forward "M a.el")
+      (setq pos-a (line-beginning-position))
+      (search-forward "R {old.el => b.el}")
+      (setq pos-b (line-beginning-position))
+      (setq-local transient-mark-mode t)
+      (goto-char pos-b)
+      (push-mark pos-a t t)
+      (should (equal (mapcar (lambda (section) (oref section value))
+                             (majutsu-file-sections-at-point-or-region))
+                     '("a.el" "b.el")))
+      (should (equal (majutsu-file-filesets-at-point-or-region)
+                     '("file:\"a.el\"" "file:\"old.el\"|file:\"b.el\"")))
+      (should-not (member section-c
+                          (majutsu-file-sections-at-point-or-region))))))
+
 (ert-deftest majutsu-file-revset-for-files-quotes-path ()
   "Paths with single quotes should be fileset-quoted."
   (should (equal (majutsu-file--revset-for-files "rev" "test'file" 'prev)

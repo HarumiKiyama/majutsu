@@ -119,6 +119,9 @@ for a class of actions that would normally ask for confirmation."
    (header :initarg :header
            :initform nil
            :documentation "Raw file header text (diff --git + extended headers).")
+   (operation-fileset :initarg :operation-fileset
+                      :initform nil
+                      :documentation "Fileset to use for file-level operations.")
    (diff-range :initarg :diff-range
                :initform nil
                :documentation "Range arguments used when loading this file's diff.")))

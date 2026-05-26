@@ -123,6 +123,14 @@
           (majutsu-split--start-interactive-selection args)
         (majutsu-run-jj-with-editor (cons "split" args))))))
 
+;;;###autoload
+(defun majutsu-file-split ()
+  "Split changes from the file at point or active file region."
+  (interactive)
+  (let ((filesets (majutsu-file-filesets-at-point-or-region)))
+    (majutsu-run-jj-with-editor (append (list "split" "--") filesets))
+    (deactivate-mark)))
+
 ;;;; Infix Commands
 
 (transient-define-argument majutsu-split:--revision ()
@@ -220,10 +228,6 @@
     (majutsu-split:--onto)
     (majutsu-split:--insert-after)
     (majutsu-split:--insert-before)
-    (majutsu-split:revision)
-    (majutsu-split:onto)
-    (majutsu-split:insert-after)
-    (majutsu-split:insert-before)
     ("c" "Clear selections" majutsu-selection-clear :transient t)]
    ["Patch Selection" :if majutsu-interactive-selection-available-p
     (majutsu-interactive:select-hunk)

@@ -638,6 +638,35 @@ newline, return an empty string.  This function aligns with
   "Return S as a jj fileset string literal."
   (format "file:\"%s\"" (majutsu-jj--escape-fileset-string s)))
 
+(defun majutsu-jj--summary-brace-paths (pathspec)
+  "Return old and new paths from a jj brace rename PATHSPEC."
+  (when (string-match "\\`\\(.*\\){\\(.+\\) => \\(.+\\)}\\(.*\\)\\'" pathspec)
+    (let ((prefix (match-string 1 pathspec))
+          (old (match-string 2 pathspec))
+          (new (match-string 3 pathspec))
+          (suffix (match-string 4 pathspec)))
+      (list (concat prefix old suffix)
+            (concat prefix new suffix)))))
+
+(defun majutsu-jj-summary-line-info (line)
+  "Return parsed file information from a jj summary/status LINE.
+The return value is a plist with `:path' and optional `:operation-fileset'."
+  (when (string-match "\\`\\([[:alpha:]?]\\)\\s-+\\(.+\\)\\'" line)
+    (let* ((status (match-string 1 line))
+           (pathspec (match-string 2 line))
+           (paths (majutsu-jj--summary-brace-paths pathspec)))
+      (if paths
+          (pcase-let ((`(,old ,new) paths))
+            (let ((info (list :path new)))
+              (if (string= status "R")
+                  (append info
+                          (list :operation-fileset
+                                (concat (majutsu-jj-fileset-quote old)
+                                        "|"
+                                        (majutsu-jj-fileset-quote new))))
+                info)))
+        (list :path pathspec)))))
+
 (defun majutsu-jj-wash (washer keep-error &rest args)
   "Run jj with ARGS, insert output at point, then call WASHER.
 KEEP-ERROR matches `magit--git-wash': nil drops stderr on error,

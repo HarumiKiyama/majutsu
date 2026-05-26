@@ -1033,6 +1033,26 @@
         (should (eq (oref section type) 'jj-file))
         (should (equal (oref section value) "path/with spaces/file.txt"))))))
 
+(ert-deftest majutsu-log--wash-status-rename-path ()
+  "Renamed files create sections using the destination path."
+  (with-temp-buffer
+    (require 'magit-section)
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (magit-insert-section (status)
+      (let ((beg (point)))
+        (insert "Working copy changes:\nR {old.txt => new.txt}\nWorking copy  (@) : abc123\n")
+        (goto-char beg)
+        (majutsu-log--wash-status nil))
+      (goto-char (point-min))
+      (search-forward "R {old.txt => new.txt}")
+      (let ((section (magit-section-at (point))))
+        (should section)
+        (should (eq (oref section type) 'jj-file))
+        (should (equal (oref section value) "new.txt"))
+        (should (equal (oref section operation-fileset)
+                       "file:\"old.txt\"|file:\"new.txt\""))))))
+
 (ert-deftest majutsu-log--wash-status-unparseable-fallback ()
   "Unparseable output is displayed as raw text."
   (with-temp-buffer
