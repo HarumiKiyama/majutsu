@@ -41,11 +41,6 @@
       (should (equal called
                      '("squash" ("--into=main" "--from=@" "--" "src/a.el") "patch" t))))))
 
-(ert-deftest majutsu-squash--initial-args/defaults-to-interactive ()
-  "Squash transient should start in Majutsu interactive selection mode."
-  (cl-letf (((symbol-function 'majutsu-squash--default-args)
-             (lambda () nil)))
-    (should (equal (majutsu-squash--initial-args) '("--interactive")))))
 
 (ert-deftest majutsu-squash-execute/default-opens-selection-page ()
   "Default squash execution should open a Majutsu file-list selection page."

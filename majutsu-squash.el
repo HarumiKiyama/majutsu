@@ -54,16 +54,6 @@ a jj-commit section, add --revision from that section."
       (mapcar (##if (string-prefix-p "--revisions=" %) (concat "--revision=" (substring % 12)))
               majutsu-buffer-diff-range))))
 
-(defun majutsu-squash--initial-args ()
-  "Return initial transient args for squash."
-  (let ((args (or (majutsu-squash--default-args) '())))
-    (if (or (member "--interactive" args)
-            (seq-some (lambda (arg)
-                        (and (stringp arg)
-                             (string-prefix-p "--tool" arg)))
-                      args))
-        args
-      (cons "--interactive" args))))
 
 (defun majutsu-squash--interactive-args-p (args)
   "Return non-nil when ARGS request Majutsu interactive squash selection."
@@ -346,7 +336,7 @@ a jj-commit section, add --revision from that section."
    'majutsu-squash nil nil
    :scope
    (majutsu-selection-session-begin)
-   :value (majutsu-squash--initial-args)))
+   :value (majutsu-squash--default-args)))
 
 ;;; _
 (provide 'majutsu-squash)
