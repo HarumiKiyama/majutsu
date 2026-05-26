@@ -41,6 +41,106 @@
       (should (equal called
                      '("restore" ("--from=main" "--to=@" "--" "src/a.el") "patch"))))))
 
+(ert-deftest majutsu-hunk-discard/restores-file-when-no-hunks-remain ()
+  "Hunk discard should restore the file directly when no hunks remain."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let* ((header (string-join
+                    '("diff --git a/src/a.el b/src/a.el"
+                      "--- a/src/a.el"
+                      "+++ b/src/a.el"
+                      "")
+                    "\n"))
+           called
+           hunk-section)
+      (magit-insert-section (jj-file "src/a.el" nil :header header)
+        (magit-insert-heading "M src/a.el")
+        (magit-insert-section (jj-hunk '("src/a.el" 1) nil)
+          (magit-insert-heading "@@ -1 +1 @@")
+          (setq hunk-section magit-insert-section--current)
+          (insert "-old\n+new\n")))
+      (goto-char (oref hunk-section start))
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'majutsu-run-jj)
+                 (lambda (&rest args)
+                   (setq called args)
+                   0)))
+        (majutsu-hunk-discard))
+      (should (equal called '("restore" "file:\"src/a.el\""))))))
+
+(ert-deftest majutsu-hunk-discard/preserves-unselected-hunks ()
+  "Hunk discard should patch restore with the file's remaining hunks."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let* ((header (string-join
+                    '("diff --git a/src/a.el b/src/a.el"
+                      "--- a/src/a.el"
+                      "+++ b/src/a.el"
+                      "")
+                    "\n"))
+           called
+           first-hunk)
+      (magit-insert-section (jj-file "src/a.el" nil :header header)
+        (magit-insert-heading "M src/a.el")
+        (magit-insert-section (jj-hunk '("src/a.el" 1) nil)
+          (magit-insert-heading "@@ -1 +1 @@")
+          (setq first-hunk magit-insert-section--current)
+          (insert "-old\n+new\n"))
+        (magit-insert-section (jj-hunk '("src/a.el" 5) nil)
+          (magit-insert-heading "@@ -5 +5 @@")
+          (insert "-keep-old\n+keep-new\n")))
+      (goto-char (oref first-hunk start))
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'majutsu-interactive-run-with-patch)
+                 (lambda (&rest args)
+                   (setq called args))))
+        (majutsu-hunk-discard))
+      (should (equal (car called) "restore"))
+      (should (equal (cadr called) '("file:\"src/a.el\"")))
+      (should-not (string-match-p "^+new$" (nth 2 called)))
+      (should (string-match-p "^-keep-old$" (nth 2 called)))
+      (should (string-match-p "^+keep-new$" (nth 2 called)))
+      (should-not (nth 3 called)))))
+
+(ert-deftest majutsu-hunk-discard/uses-operation-fileset ()
+  "Hunk discard should honor a file section's operation fileset."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let* ((header (string-join
+                    '("diff --git a/old.txt b/new.txt"
+                      "copy from old.txt"
+                      "copy to new.txt"
+                      "--- a/old.txt"
+                      "+++ b/new.txt"
+                      "")
+                    "\n"))
+           called
+           hunk-section)
+      (magit-insert-section (jj-file "new.txt" nil
+                                     :header header
+                                     :operation-fileset
+                                     "file:\"old.txt\"|file:\"new.txt\"")
+        (magit-insert-heading "C {old.txt => new.txt}")
+        (magit-insert-section (jj-hunk '("new.txt" 1) nil)
+          (magit-insert-heading "@@ -1 +1 @@")
+          (setq hunk-section magit-insert-section--current)
+          (insert "-old\n+new\n")))
+      (goto-char (oref hunk-section start))
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'majutsu-run-jj)
+                 (lambda (&rest args)
+                   (setq called args)
+                   0)))
+        (majutsu-hunk-discard))
+      (should (equal called
+                     '("restore" "file:\"old.txt\"|file:\"new.txt\""))))))
+
 (ert-deftest majutsu-restore-file-at-point/uses-operation-fileset ()
   "File-level restore should honor a section-specific operation fileset."
   (with-temp-buffer

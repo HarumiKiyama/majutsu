@@ -526,11 +526,7 @@ ARGS are the diff arguments used to produce DIFF-OUTPUT."
   (let* ((args (append '("diff" "--summary")
                        majutsu-buffer-diff-range
                        majutsu-buffer-diff-filesets))
-         (summary (majutsu--with-no-color
-                    (apply #'majutsu-jj-string args)))
-         (lines (and summary
-                     (seq-remove #'string-empty-p
-                                 (split-string summary "\n")))))
+         (lines (apply #'majutsu-jj-lines args)))
     (magit-insert-section (diff-root)
       (magit-insert-heading (format "jj %s" (string-join args " ")))
       (dolist (line lines)

@@ -1728,6 +1728,17 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
   "Return changed file path parsed from summary LINE."
   (plist-get (majutsu-jj-summary-line-info line) :path))
 
+(defun majutsu-log--commit-body-prefix (commit-section)
+  "Return display prefix for inline body under COMMIT-SECTION."
+  (let ((prefix (get-text-property (oref commit-section start) 'line-prefix)))
+    (make-string (string-width (or prefix "")) ?\s)))
+
+(defun majutsu-log--insert-prefixed-heading (heading prefix)
+  "Insert section HEADING with display-only PREFIX."
+  (let ((start (point)))
+    (magit-insert-heading heading)
+    (majutsu-log--apply-line-prefix-span start (point) prefix)))
+
 (defun majutsu-log--commit-section-at-point ()
   "Return the enclosing `jj-commit' section at point."
   (let ((section (magit-current-section)))
@@ -1743,11 +1754,8 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
   "Load changed file sections for COMMIT-SECTION."
   (let* ((rev (oref commit-section value))
          (range (list (concat "--revisions=" rev)))
-         (summary (majutsu--with-no-color
-                    (majutsu-jj-string "diff" "--summary" (car range))))
-         (lines (and summary
-                     (seq-remove #'string-empty-p
-                                 (split-string summary "\n"))))
+         (lines (majutsu-jj-lines "diff" "--summary" (car range)))
+         (prefix (majutsu-log--commit-body-prefix commit-section))
          (inhibit-read-only t)
          (magit-insert-section--parent commit-section)
          (magit-insert-section--current nil)
@@ -1757,7 +1765,7 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
         (goto-char (oref commit-section end))
         (let ((beg (point)))
           (magit-insert-section (changed-files rev)
-            (magit-insert-heading "Changed files")
+            (majutsu-log--insert-prefixed-heading "Changed files" prefix)
             (dolist (line lines)
               (when-let* ((info (majutsu-jj-summary-line-info line))
                           (file (plist-get info :path)))
@@ -1765,7 +1773,7 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
                                                :diff-range range
                                                :operation-fileset
                                                (plist-get info :operation-fileset))
-                  (magit-insert-heading line)))))
+                  (majutsu-log--insert-prefixed-heading line prefix)))))
           (when (or (null (oref commit-section content))
                     (= (oref commit-section content) (oref commit-section end)))
             (if (markerp (oref commit-section content))

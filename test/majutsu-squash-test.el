@@ -27,6 +27,70 @@
       (should (equal (majutsu-squash-arguments)
                      '("--into=main" "--from=@" "--" "src/a.el"))))))
 
+(ert-deftest majutsu-squash-arguments/defaults-single-region-commit-to-revision ()
+  "A single selected commit should default to --revision."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          pos)
+      (magit-insert-section (log)
+        (magit-insert-section (jj-commit "change-a" t)
+          (setq pos (point))
+          (magit-insert-heading "change-a")))
+      (setq-local transient-mark-mode t)
+      (goto-char pos)
+      (push-mark pos t t)
+      (let ((transient-current-command nil))
+        (should (equal (majutsu-squash-arguments)
+                       '("--revision=change-a")))))))
+
+(ert-deftest majutsu-squash-arguments/defaults-multi-region-commits-to-from-into ()
+  "Multiple selected commits should squash newer commits into the oldest one."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          pos-newest pos-middle pos-oldest)
+      (magit-insert-section (log)
+        (magit-insert-section (jj-commit "change-newest" t)
+          (setq pos-newest (point))
+          (magit-insert-heading "change-newest"))
+        (magit-insert-section (jj-commit "change-middle" t)
+          (setq pos-middle (point))
+          (magit-insert-heading "change-middle"))
+        (magit-insert-section (jj-commit "change-oldest" t)
+          (setq pos-oldest (point))
+          (magit-insert-heading "change-oldest")))
+      (setq-local transient-mark-mode t)
+      (goto-char pos-oldest)
+      (push-mark pos-newest t t)
+      (let ((transient-current-command nil))
+        (should (equal (majutsu-squash-arguments)
+                       '("--from=change-newest"
+                         "--from=change-middle"
+                         "--into=change-oldest")))))))
+
+(ert-deftest majutsu-squash-arguments/explicit-transient-args-win-over-region-defaults ()
+  "Explicit squash transient args should not be replaced by region defaults."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t)
+          pos-newest pos-oldest)
+      (magit-insert-section (log)
+        (magit-insert-section (jj-commit "change-newest" t)
+          (setq pos-newest (point))
+          (magit-insert-heading "change-newest"))
+        (magit-insert-section (jj-commit "change-oldest" t)
+          (setq pos-oldest (point))
+          (magit-insert-heading "change-oldest")))
+      (setq-local transient-mark-mode t)
+      (goto-char pos-oldest)
+      (push-mark pos-newest t t)
+      (let ((transient-current-command 'majutsu-squash))
+        (cl-letf (((symbol-function 'transient-args)
+                   (lambda (&rest _) '("--from=manual" "--into=target"))))
+          (should (equal (majutsu-squash-arguments)
+                         '("--from=manual" "--into=target"))))))))
+
 (ert-deftest majutsu-squash-execute-normalizes-patch-flow-args ()
   "Patch-based squash should receive normalized args."
   (let (called)

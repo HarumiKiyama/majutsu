@@ -1176,11 +1176,12 @@
     (setq buffer-read-only nil)
     (let ((calls 0)
           commit-section files-section)
-      (cl-letf (((symbol-function 'majutsu-jj-string)
-                 (lambda (&rest args)
+      (cl-letf (((symbol-function 'majutsu--jj-insert)
+                 (lambda (_return-error &rest args)
                    (should (equal args '("diff" "--summary" "--revisions=change-a")))
                    (cl-incf calls)
-                   "M src/a.el\nA docs/readme.org\n")))
+                   (insert "M src/a.el\nA docs/readme.org\n")
+                   0)))
         (magit-insert-section (jj-commit "change-a" t)
           (magit-insert-heading "change-a Add files"))
         (goto-char (point-min))
@@ -1207,6 +1208,70 @@
         (majutsu-log-toggle-change-files)
         (should (= calls 1))
         (should-not (oref files-section hidden))))))
+
+(ert-deftest majutsu-log-toggle-change-files-indents-inline-change-files ()
+  "F on a graph log commit should keep changed files under the commit indent."
+  (with-temp-buffer
+    (require 'magit-section)
+    (majutsu-log-mode)
+    (setq buffer-read-only nil)
+    (let ((compiled (majutsu-log-test--base-compiled))
+          (diff (string-join
+                 '("diff --git a/src/a.el b/src/a.el"
+                   "index 1234567..89abcde 100644"
+                   "--- a/src/a.el"
+                   "+++ b/src/a.el"
+                   "@@ -1 +1 @@"
+                   "-old"
+                   "+new")
+                 "\n"))
+          files-section file-section)
+      (cl-letf (((symbol-function 'majutsu--jj-insert)
+                 (lambda (_return-error &rest args)
+                   (should (equal args '("diff" "--summary" "--revisions=change-a")))
+                   (insert "M src/a.el\n")
+                   0))
+                ((symbol-function 'majutsu-jj-insert)
+                 (lambda (&rest args)
+                   (pcase args
+                     ('("diff" "--summary" "--revisions=change-a")
+                      (insert "M src/a.el\n"))
+                     ('("diff" "--git" "--revisions=change-a" "--" "src/a.el")
+                      (insert diff))
+                     (_ (ert-fail (format "Unexpected jj args: %S" args))))
+                   0)))
+        (majutsu-log--insert-entry
+         (list :id "change-a"
+               :columns '((change-id . "change-a")
+                           (description . "Add files"))
+               :heading-prefixes '("○ "))
+         compiled)
+        (goto-char (point-min))
+        (majutsu-log-toggle-change-files)
+        (setq files-section
+              (seq-find (lambda (child)
+                          (eq (oref child type) 'changed-files))
+                        (oref (magit-current-section) children)))
+        (should files-section)
+        (setq file-section (car (oref files-section children)))
+        (let ((changed-prefix
+               (get-text-property (oref files-section start) 'line-prefix))
+              (file-prefix
+               (get-text-property (oref file-section start) 'line-prefix)))
+          (should (equal (substring-no-properties changed-prefix) "  "))
+          (should (equal (substring-no-properties file-prefix) "  ")))
+        (goto-char (oref file-section start))
+        (majutsu-file-toggle-diff)
+        (should-not (oref file-section hidden))
+        (should (equal (substring-no-properties
+                        (get-text-property (oref file-section start) 'line-prefix))
+                       "  "))
+        (goto-char (oref file-section start))
+        (majutsu-file-toggle-diff)
+        (should (oref file-section hidden))
+        (should (equal (substring-no-properties
+                        (get-text-property (oref file-section start) 'line-prefix))
+                       "  "))))))
 
 (ert-deftest majutsu-file-toggle-diff-uses-log-change-revision-context ()
   "TAB on a log change file loads that file's diff for the parent revision."

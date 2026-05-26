@@ -21,12 +21,40 @@
 (require 'cl-lib)
 (require 'magit-section)
 (require 'seq)
+(require 'subr-x)
 (require 'majutsu-base)
 
 (declare-function magit-section--opportunistic-paint "magit-section" (section))
 (declare-function magit-section--opportunistic-wash "magit-section" (section))
 (declare-function magit-section-maybe-cache-visibility "magit-section" (section))
 (declare-function magit-section-maybe-update-visibility-indicator "magit-section" (section))
+
+(defun majutsu-section--prefixed-indicator-string (string prefix)
+  "Return indicator STRING displayed after PREFIX."
+  (if (and (stringp string)
+           (stringp prefix)
+           (not (string-empty-p prefix))
+           (string-match-p "\\`[ \t]+\\'" (substring-no-properties prefix))
+           (not (string-prefix-p prefix string)))
+      (concat prefix string)
+    string))
+
+(defun majutsu-section--update-visibility-indicator (section)
+  "Update SECTION's visibility indicator preserving display-only indentation."
+  (magit-section-maybe-update-visibility-indicator section)
+  (let* ((beg (oref section start))
+         (eoh (save-excursion
+                (goto-char beg)
+                (line-end-position)))
+         (prefix (get-text-property beg 'line-prefix)))
+    (when (and (stringp prefix)
+               (not (string-empty-p prefix)))
+      (dolist (overlay (overlays-in beg (1+ eoh)))
+        (when (overlay-get overlay 'magit-vis-indicator)
+          (when-let* ((before (overlay-get overlay 'before-string)))
+            (overlay-put overlay 'before-string
+                         (majutsu-section--prefixed-indicator-string
+                          before prefix))))))))
 
 (cl-defgeneric majutsu-section--hidden-bounds (section)
   "Return invisible overlay bounds for SECTION as (BEG . END).
@@ -61,7 +89,7 @@ Emacs overlay conventions and is exclusive.")
   (magit-section--opportunistic-paint section)
   (when-let* ((bounds (majutsu-section--hidden-bounds section)))
     (remove-overlays (car bounds) (cdr bounds) 'invisible t))
-  (magit-section-maybe-update-visibility-indicator section)
+  (majutsu-section--update-visibility-indicator section)
   (magit-section-maybe-cache-visibility section)
   (dolist (child (oref section children))
     (if (oref child hidden)
@@ -83,7 +111,7 @@ Emacs overlay conventions and is exclusive.")
           (overlay-put overlay 'evaporate t)
           (overlay-put overlay 'invisible t)
           (overlay-put overlay 'cursor-intangible t))))
-    (magit-section-maybe-update-visibility-indicator section)
+    (majutsu-section--update-visibility-indicator section)
     (magit-section-maybe-cache-visibility section)))
 
 (defun majutsu-section-toggle (section)

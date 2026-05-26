@@ -40,6 +40,20 @@
     (should-not (string-match-p "/ssh:demo:" (nth 1 config)))
     (should-not (string-match-p "/ssh:demo:" (nth 3 config)))))
 
+(ert-deftest majutsu-interactive--write-applypatch-script/apply-reverse ()
+  "Apply-reverse mode should reverse-apply the patch to the right side."
+  (let ((majutsu-interactive--temp-dir nil)
+        (majutsu-interactive--temp-dir-remote nil))
+    (cl-letf (((symbol-function 'majutsu-interactive--temp-dir)
+               (lambda ()
+                 temporary-file-directory)))
+      (let* ((script (majutsu-interactive--write-applypatch-script 'apply-reverse))
+             (contents (with-temp-buffer
+                         (insert-file-contents script)
+                         (buffer-string))))
+        (should (string-match-p "git apply --reverse" contents))
+        (should-not (string-match-p "Reset right to left state" contents))))))
+
 (ert-deftest majutsu-interactive--temp-dir/uses-nearby-temp-file ()
   "Temp dir helper should allocate directories near current workspace."
   (let ((majutsu-interactive--temp-dir nil)
@@ -108,6 +122,131 @@
                           (string-match-p "\\[~\\]"
                                           (or (overlay-get ov 'before-string) "")))
                         (overlays-at (oref file-section start)))))))
+
+(ert-deftest majutsu-interactive-select-marked-range/selects-multiple-hunks ()
+  "Marked diff text should select every intersecting hunk."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let (first-hunk second-hunk beg end)
+      (magit-insert-section (jj-file "src/a.el" nil)
+        (magit-insert-heading "M src/a.el")
+        (magit-insert-section (jj-hunk '("src/a.el" 1) nil)
+          (magit-insert-heading "@@ -1 +1 @@")
+          (setq first-hunk magit-insert-section--current)
+          (insert "-old\n+new\n"))
+        (magit-insert-section (jj-hunk '("src/a.el" 2) nil)
+          (magit-insert-heading "@@ -2 +2 @@")
+          (setq second-hunk magit-insert-section--current)
+          (insert "-old2\n+new2\n")))
+      (setq beg (oref first-hunk start))
+      (setq end (oref second-hunk end))
+      (setq-local transient-mark-mode t)
+      (goto-char end)
+      (push-mark beg t t)
+      (majutsu-interactive-select-marked-range)
+      (should (eq (majutsu-interactive--get-selection
+                   (majutsu-interactive--hunk-id first-hunk))
+                  :all))
+      (should (eq (majutsu-interactive--get-selection
+                   (majutsu-interactive--hunk-id second-hunk))
+                  :all))
+      (should-not mark-active))))
+
+(ert-deftest majutsu-interactive-select-marked-range/selects-hunks-across-files ()
+  "Marked diff text should select intersecting hunks from multiple files."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let (first-hunk second-hunk beg end)
+      (magit-insert-section (diff)
+        (magit-insert-section (jj-file "src/a.el" nil)
+          (magit-insert-heading "M src/a.el")
+          (magit-insert-section (jj-hunk '("src/a.el" 1) nil)
+            (magit-insert-heading "@@ -1 +1 @@")
+            (setq first-hunk magit-insert-section--current)
+            (insert "-old\n+new\n")))
+        (magit-insert-section (jj-file "src/b.el" nil)
+          (magit-insert-heading "M src/b.el")
+          (magit-insert-section (jj-hunk '("src/b.el" 1) nil)
+            (magit-insert-heading "@@ -1 +1 @@")
+            (setq second-hunk magit-insert-section--current)
+            (insert "-old\n+new\n"))))
+      (setq beg (oref first-hunk start))
+      (setq end (oref second-hunk end))
+      (setq-local transient-mark-mode t)
+      (goto-char end)
+      (push-mark beg t t)
+      (majutsu-interactive-select-marked-range)
+      (should (eq (majutsu-interactive--get-selection
+                   (majutsu-interactive--hunk-id first-hunk))
+                  :all))
+      (should (eq (majutsu-interactive--get-selection
+                   (majutsu-interactive--hunk-id second-hunk))
+                  :all)))))
+
+(ert-deftest majutsu-interactive-select-marked-range/selects-metadata-only-file ()
+  "Marked metadata-only file sections should be selected at file level."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let (file-section beg end)
+      (magit-insert-section (jj-file "new.txt" nil :header "diff --git a/old.txt b/new.txt\n")
+        (magit-insert-heading "R old.txt => new.txt")
+        (setq file-section magit-insert-section--current))
+      (setq beg (oref file-section start))
+      (setq end (oref file-section end))
+      (setq-local transient-mark-mode t)
+      (goto-char end)
+      (push-mark beg t t)
+      (majutsu-interactive-select-marked-range)
+      (should (majutsu-interactive--get-file-selection file-section)))))
+
+(ert-deftest majutsu-interactive-select-marked-range/ignores-lazy-file-list-items ()
+  "Marked lazy file-list items should not create empty file selections."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let (file-section beg end)
+      (magit-insert-section (diff-root)
+        (magit-insert-section (jj-file "src/a.el" nil
+                                       :diff-range '("--revisions=abc"))
+          (magit-insert-heading "M src/a.el")
+          (setq file-section magit-insert-section--current)))
+      (setq beg (oref file-section start))
+      (setq end (oref file-section end))
+      (setq-local transient-mark-mode t)
+      (goto-char end)
+      (push-mark beg t t)
+      (should-error (majutsu-interactive-select-marked-range)
+                    :type 'user-error)
+      (should-not (majutsu-interactive--get-file-selection file-section))
+      (should-not (majutsu-interactive--has-selections-p)))))
+
+(ert-deftest majutsu-interactive-toggle-file/ignores-lazy-file-list-item ()
+  "File selection on a lazy file-list item should not create an empty patch."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (let (file-section)
+      (magit-insert-section (diff-root)
+        (magit-insert-section (jj-file "src/a.el" nil
+                                       :diff-range '("--revisions=abc"))
+          (magit-insert-heading "M src/a.el")
+          (setq file-section magit-insert-section--current)))
+      (goto-char (oref file-section start))
+      (should-error (majutsu-interactive-toggle-file)
+                    :type 'user-error)
+      (should-not (majutsu-interactive--get-file-selection file-section))
+      (should-not (majutsu-interactive--has-selections-p)))))
+
+(ert-deftest majutsu-interactive-select-marked-range/requires-active-region ()
+  "Selecting a marked range should require an active region."
+  (with-temp-buffer
+    (magit-section-mode)
+    (setq buffer-read-only nil)
+    (should-error (majutsu-interactive-select-marked-range)
+                  :type 'user-error)))
 
 (ert-deftest majutsu-interactive--build-file-patch/renamed-hunk-only-omits-rename ()
   "Hunk-only selection in a renamed file should not move the rename metadata."

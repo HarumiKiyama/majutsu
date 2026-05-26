@@ -145,5 +145,39 @@
     (should-not (oref from value))
     (should-not (oref from-toggle value))))
 
+(ert-deftest majutsu-selection-repeat-option-init-strips-argument-prefix ()
+  "Repeat options should store raw values after transient initialization."
+  (let* ((prefix (make-instance 'transient-prefix
+                                :command 'ignore
+                                :incompatible nil))
+         (from (make-instance 'majutsu-test-option
+                              :command 'ignore
+                              :key "-f"
+                              :argument "--from="
+                              :multi-value 'repeat))
+         (transient--prefix prefix))
+    (oset prefix value '("--from=abc" "--from=def"))
+    (transient-init-value from)
+    (should (equal (oref from value) '("abc" "def")))
+    (should (equal (transient-infix-value from)
+                   '("--from=abc" "--from=def")))))
+
+(ert-deftest majutsu-selection-repeat-option-set-strips-argument-prefix ()
+  "Repeat options should not double-prefix values passed to infix set."
+  (let* ((prefix (make-instance 'transient-prefix
+                                :command 'ignore
+                                :incompatible nil))
+         (from (make-instance 'majutsu-test-option
+                              :command 'ignore
+                              :key "-f"
+                              :argument "--from="
+                              :multi-value 'repeat))
+         (transient--prefix prefix)
+         (transient--suffixes (list from)))
+    (transient-infix-set from '("--from=abc" "--from=def"))
+    (should (equal (oref from value) '("abc" "def")))
+    (should (equal (transient-infix-value from)
+                   '("--from=abc" "--from=def")))))
+
 (provide 'majutsu-selection-test)
 ;;; majutsu-selection-test.el ends here

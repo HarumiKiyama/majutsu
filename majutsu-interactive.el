@@ -173,6 +173,11 @@ When CONTEXT-ON-ADDED is non-nil, treat unselected added lines as context."
           (setq file-section
                 (or (majutsu-interactive--file-section-with-hunks file)
                     file-section)))
+        (when (and (not (seq-some (lambda (child)
+                                     (magit-section-match 'jj-hunk child))
+                                   (oref file-section children)))
+                   (not (majutsu-interactive--file-has-diff-header-p file-section)))
+          (user-error "Expand file diff before selecting it"))
         (let* ((hunks (oref file-section children))
                (hunk-sections (seq-filter
                                (lambda (child)
@@ -244,6 +249,64 @@ The range is clamped to LIMIT-START and LIMIT-END."
        (deactivate-mark)
        (message "Region selection updated")))))
 
+(defun majutsu-interactive--section-intersects-region-p (section beg end)
+  "Return non-nil when SECTION intersects region between BEG and END."
+  (let ((start (marker-position (oref section start)))
+        (finish (marker-position (oref section end)))
+        (rbeg (min beg end))
+        (rend (max beg end)))
+    (and start finish
+         (< start rend)
+         (> finish rbeg))))
+
+(defun majutsu-interactive--file-has-hunks-p (file-section)
+  "Return non-nil when FILE-SECTION has hunk children."
+  (seq-some (lambda (child)
+              (magit-section-match 'jj-hunk child))
+            (oref file-section children)))
+
+(defun majutsu-interactive--file-has-diff-header-p (file-section)
+  "Return non-nil when FILE-SECTION has a real diff header."
+  (let ((header (oref file-section header)))
+    (and (stringp header)
+         (> (length header) 0))))
+
+(defun majutsu-interactive-select-marked-range ()
+  "Select all selectable diff items intersecting the active region.
+Intersecting hunks are selected as whole hunks.  Metadata-only file
+sections, such as pure renames, are selected at file level."
+  (interactive)
+  (unless (use-region-p)
+    (user-error "No region active"))
+  (let ((beg (region-beginning))
+        (end (region-end))
+        (hunk-count 0)
+        (file-count 0))
+    (when magit-root-section
+      (magit-map-sections
+       (lambda (section)
+         (cond
+          ((and (magit-section-match 'jj-hunk section)
+                (majutsu-interactive--section-intersects-region-p section beg end))
+           (majutsu-interactive--set-selection
+            (majutsu-interactive--hunk-id section)
+            :all)
+           (setq hunk-count (1+ hunk-count)))
+          ((and (magit-section-match 'jj-file section)
+                (not (majutsu-interactive--file-has-hunks-p section))
+                (majutsu-interactive--file-has-diff-header-p section)
+                (majutsu-interactive--section-intersects-region-p section beg end))
+           (majutsu-interactive--set-file-selection section t)
+           (setq file-count (1+ file-count)))))
+       magit-root-section))
+    (unless (> (+ hunk-count file-count) 0)
+      (user-error "No hunks or files in region"))
+    (majutsu-interactive--render-overlays)
+    (deactivate-mark)
+    (message "Selected %d %s"
+             (+ hunk-count file-count)
+             (if (= (+ hunk-count file-count) 1) "item" "items"))))
+
 (defun majutsu-interactive-clear ()
   "Clear all selections."
   (interactive)
@@ -285,6 +348,16 @@ The range is clamped to LIMIT-START and LIMIT-END."
   :transient t
   (interactive)
   (majutsu-interactive--call-in-selection-buffer #'majutsu-interactive-toggle-region))
+
+(transient-define-suffix majutsu-interactive:select-marked-range ()
+  "Select marked range."
+  :key "M"
+  :description "Select marked range"
+  :if 'majutsu-interactive-selection-available-p
+  :transient t
+  (interactive)
+  (majutsu-interactive--call-in-selection-buffer
+   #'majutsu-interactive-select-marked-range))
 
 ;;; Overlay Rendering
 
@@ -721,7 +794,9 @@ Returns patch string or nil if no selections."
 
 (defun majutsu-interactive--write-applypatch-script (reverse)
   "Write the applypatch helper script and return its path.
-When REVERSE is non-nil, reset $right to $left state first, then apply patch."
+When REVERSE is `apply-reverse', reverse-apply PATCH to $right.
+When REVERSE is any other non-nil value, reset $right to $left state first,
+then apply PATCH."
   (let ((script (expand-file-name "applypatch.sh" (majutsu-interactive--temp-dir))))
     (with-temp-file script
       (insert "#!/bin/sh\n")
@@ -730,7 +805,7 @@ When REVERSE is non-nil, reset $right to $left state first, then apply patch."
       (insert "LEFT=\"$1\"\n")
       (insert "RIGHT=\"$2\"\n")
       (insert "PATCH=\"$3\"\n")
-      (when reverse
+      (when (and reverse (not (eq reverse 'apply-reverse)))
         ;; For split/squash: reset $right to $left (parent) state first
         ;; Then apply the patch containing remaining content
         (insert "# Reset right to left state\n")
@@ -739,12 +814,16 @@ When REVERSE is non-nil, reset $right to $left state first, then apply patch."
         (insert "cp -a \"$LEFT\"/. \"$RIGHT\"/ 2>/dev/null || true\n"))
       (insert "cd \"$RIGHT\"\n")
       ;; Try git apply with --recount which recalculates line numbers
-      (insert "git apply --recount --unidiff-zero -v \"$PATCH\" 2>&1 && exit 0\n")
+      (if (eq reverse 'apply-reverse)
+          (insert "git apply --reverse --recount --unidiff-zero -v \"$PATCH\" 2>&1 && exit 0\n")
+        (insert "git apply --recount --unidiff-zero -v \"$PATCH\" 2>&1 && exit 0\n"))
       ;; Fallback: init git repo for 3way merge
       (insert "git init -q 2>/dev/null\n")
       (insert "git add -A 2>/dev/null\n")
       (insert "git commit -q -m 'base' --allow-empty 2>/dev/null\n")
-      (insert "git apply --3way --recount -v \"$PATCH\" 2>&1\n")
+      (if (eq reverse 'apply-reverse)
+          (insert "git apply --reverse --3way --recount -v \"$PATCH\" 2>&1\n")
+        (insert "git apply --3way --recount -v \"$PATCH\" 2>&1\n"))
       (insert "EXIT=$?\n")
       (insert "rm -rf .git 2>/dev/null\n")
       (insert "exit $EXIT\n"))
@@ -753,7 +832,7 @@ When REVERSE is non-nil, reset $right to $left state first, then apply patch."
 
 (defun majutsu-interactive--build-tool-config (patch-file reverse)
   "Build jj --config arguments for applypatch tool with PATCH-FILE.
-When REVERSE is non-nil, the script will apply the patch in reverse."
+REVERSE is passed through to `majutsu-interactive--write-applypatch-script'."
   (let* ((script (majutsu-interactive--write-applypatch-script reverse))
          (script-path (majutsu-convert-filename-for-jj script))
          (patch-path (majutsu-convert-filename-for-jj patch-file)))
@@ -767,7 +846,9 @@ When REVERSE is non-nil, the script will apply the patch in reverse."
 
 (defun majutsu-interactive-run-with-patch (command args patch &optional reverse)
   "Run jj COMMAND with ARGS, applying PATCH via custom tool.
-If REVERSE is non-nil, apply the patch in reverse using git apply -R."
+If REVERSE is `apply-reverse', reverse-apply PATCH to the right side.
+If REVERSE is any other non-nil value, reset the right side to the left side
+before applying PATCH."
   (let* ((patch-file (majutsu-interactive--write-patch patch))
          (tool-config (majutsu-interactive--build-tool-config patch-file reverse))
          (full-args (append (list command)

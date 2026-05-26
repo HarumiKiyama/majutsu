@@ -331,8 +331,31 @@ ID must be a single selection category."
   ((format :initform " %k %d"))
   "Option class for toggling selection at point.")
 
+(defun majutsu-selection--strip-option-argument (obj value)
+  "Return VALUE without OBJ's option argument prefix, when present."
+  (if-let* ((argument (and (slot-boundp obj 'argument)
+                           (oref obj argument))))
+      (cond
+       ((stringp value)
+        (if (string-prefix-p argument value)
+            (substring value (length argument))
+          value))
+       ((and (listp value)
+             (eq (oref obj multi-value) 'repeat))
+        (mapcar (lambda (item)
+                  (majutsu-selection--strip-option-argument obj item))
+                value))
+       (t value))
+    value))
+
+(cl-defmethod transient-init-value :after ((obj majutsu-selection-option))
+  (when (slot-boundp obj 'value)
+    (oset obj value
+          (majutsu-selection--strip-option-argument obj (oref obj value)))))
+
 (cl-defmethod transient-infix-set ((obj majutsu-selection-option) value)
-  (cl-call-next-method)
+  (setq value (majutsu-selection--strip-option-argument obj value))
+  (cl-call-next-method obj value)
   (when (and (or (not majutsu-selection--infix-syncing)
                  (null value))
              (boundp 'transient--suffixes)

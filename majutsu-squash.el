@@ -29,6 +29,17 @@
 
 ;;; majutsu-squash
 
+(defun majutsu-squash--selected-commit-args ()
+  "Return default squash args for the selected `jj-commit' region."
+  (when-let* ((revsets (magit-region-values 'jj-commit t)))
+    (if (= (length revsets) 1)
+        (list (concat "--revision=" (car revsets)))
+      (let ((source-revsets (butlast revsets))
+            (destination (car (last revsets))))
+        (append (mapcar (lambda (rev) (concat "--from=" rev))
+                        source-revsets)
+                (list (concat "--into=" destination)))))))
+
 (defun majutsu-squash-arguments ()
   "Return the current squash arguments.
 If inside the transient, return transient args.
@@ -43,16 +54,21 @@ a jj-commit section, add --revision from that section."
                            (string-prefix-p "--from=" arg)
                            (string-prefix-p "--into=" arg)))
                      args)
-      (when-let* ((rev (magit-section-value-if 'jj-commit)))
-        (push (concat "--revision=" rev) args)))
+      (setq args
+            (or (majutsu-squash--selected-commit-args)
+                (when-let* ((rev (magit-section-value-if 'jj-commit)))
+                  (cons (concat "--revision=" rev) args))
+                args)))
     args))
 
 (defun majutsu-squash--default-args ()
-  "Return default args from diff buffer context."
+  "Return default args from commit region or diff buffer context."
   (with-current-buffer (majutsu-interactive--selection-buffer)
-    (when (derived-mode-p 'majutsu-diff-mode)
-      (mapcar (##if (string-prefix-p "--revisions=" %) (concat "--revision=" (substring % 12)))
-              majutsu-buffer-diff-range))))
+    (or (majutsu-squash--selected-commit-args)
+        (when (derived-mode-p 'majutsu-diff-mode)
+          (mapcar (##if (string-prefix-p "--revisions=" %)
+                      (concat "--revision=" (substring % 12)))
+                  majutsu-buffer-diff-range)))))
 
 
 (defun majutsu-squash--interactive-args-p (args)
@@ -320,6 +336,7 @@ a jj-commit section, add --revision from that section."
     (majutsu-interactive:select-hunk)
     (majutsu-interactive:select-file)
     (majutsu-interactive:select-region)
+    (majutsu-interactive:select-marked-range)
     ("C" "Clear patch selections" majutsu-interactive-clear :transient t)]
    ["Paths" :if-not majutsu-interactive-selection-available-p
     (majutsu-squash:--)]

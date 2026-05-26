@@ -1,5 +1,6 @@
 ;;; majutsu-split.el --- Split transient for Majutsu  -*- lexical-binding: t; -*-
 
+;; xxxx
 ;; Copyright (C) 2026 0WD0
 
 ;; Author: 0WD0 <wd.1105848296@gmail.com>
@@ -225,6 +226,7 @@
     (majutsu-interactive:select-hunk)
     (majutsu-interactive:select-file)
     (majutsu-interactive:select-region)
+    (majutsu-interactive:select-marked-range)
     ("C" "Clear patch selections" majutsu-interactive-clear :transient t)]
    ["Options"
     ("-p" "Parallel" "--parallel")
