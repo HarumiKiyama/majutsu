@@ -36,24 +36,21 @@
                     %)
               majutsu-buffer-diff-range))))
 
-(defun majutsu-split--initial-args ()
-  "Return initial transient args for split."
-  (let ((args (or (majutsu-split--default-args) '())))
-    (if (or (member "--interactive" args)
-            (seq-some (lambda (arg)
-                        (and (stringp arg)
-                             (string-prefix-p "--tool" arg)))
-                      args))
-        args
-      (cons "--interactive" args))))
-
-(defun majutsu-split--interactive-args-p (args)
-  "Return non-nil when ARGS request Majutsu interactive split selection."
-  (and (member "--interactive" args)
-       (not (seq-some (lambda (arg)
-                        (and (stringp arg)
-                             (string-prefix-p "--tool" arg)))
-                      args))))
+(defun majutsu-split--strip-interactive-args (args)
+  "Return ARGS without native interactive split editor options."
+  (let (stripped skip-next)
+    (dolist (arg args)
+      (cond
+       (skip-next
+        (setq skip-next nil))
+       ((member arg '("--interactive" "-i")))
+       ((and (stringp arg)
+             (string-prefix-p "--tool=" arg)))
+       ((equal arg "--tool")
+        (setq skip-next t))
+       (t
+        (push arg stripped))))
+    (nreverse stripped)))
 
 (defun majutsu-split--filesets-from-args (args)
   "Return filesets after `--' in normalized ARGS."
@@ -107,10 +104,7 @@
          (patch (majutsu-interactive-build-patch-if-selected selection-buf nil nil))
          (args (majutsu--normalize-fileset-args args))
          (args (if patch
-                   (seq-remove (lambda (arg)
-                                 (or (string= arg "--interactive")
-                                     (string-prefix-p "--tool=" arg)))
-                               args)
+                   (majutsu-split--strip-interactive-args args)
                  args)))
     (if patch
         (progn
@@ -119,9 +113,7 @@
           (majutsu-interactive-run-with-patch "split" args patch t)
           (with-current-buffer selection-buf
             (majutsu-interactive-clear)))
-      (if (majutsu-split--interactive-args-p args)
-          (majutsu-split--start-interactive-selection args)
-        (majutsu-run-jj-with-editor (cons "split" args))))))
+      (majutsu-split--start-interactive-selection args))))
 
 ;;;###autoload
 (defun majutsu-file-split ()
@@ -234,13 +226,8 @@
     (majutsu-interactive:select-file)
     (majutsu-interactive:select-region)
     ("C" "Clear patch selections" majutsu-interactive-clear :transient t)]
-   ["Paths" :if-not majutsu-interactive-selection-available-p
-    (majutsu-split:--)]
    ["Options"
-    ("-i" "Interactive" "--interactive")
     ("-p" "Parallel" "--parallel")
-    ("-e" "Editor" "--editor")
-    ("-t" "Tool" "--tool=")
     (majutsu-transient-arg-ignore-immutable)]
    ["Actions"
     ("s" "Execute split" majutsu-split-execute)
@@ -251,7 +238,7 @@
    'majutsu-split nil nil
    :scope
    (majutsu-selection-session-begin)
-   :value (majutsu-split--initial-args)))
+   :value (majutsu-split--default-args)))
 
 ;;; _
 (provide 'majutsu-split)

@@ -500,10 +500,8 @@ Runs: =jj undo= or =jj redo=
 - Key: -r :: Specify the revision to split.
 - Key: -o :: Specify the destination (=--onto=).
 - Key: -A / -B :: Insert after or before constraints.
-- Key: -m :: Set a message for the first part.
 - Key: -p :: Parallel split mode.
-- Key: -- :: Limit split to selected files or filesets.
-Runs: =jj split -r REV [FILESETS...]=
+Runs: open a Majutsu diff selection page, then split selected changes.
 
 ** Restoring
 - Key: R (majutsu-restore) :: Open the Restore transient for undoing changes.

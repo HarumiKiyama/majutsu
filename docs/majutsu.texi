@@ -1299,17 +1299,11 @@ Specify the destination (@samp{--onto}).
 @item @kbd{-A / -B}
 @kindex -A / -B
 Insert after or before constraints.
-@item @kbd{-m}
-@kindex -m
-Set a message for the first part.
 @item @kbd{-p}
 @kindex -p
 Parallel split mode.
-@item @kbd{--}
-@kindex --
-Limit split to selected files or filesets.
 @end table
-Runs: @samp{jj split -r REV [FILESETS...]}
+Runs: open a Majutsu diff selection page, then split selected changes.
 
 @node Restoring
 @section Restoring
