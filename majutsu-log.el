@@ -1739,6 +1739,16 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
     (magit-insert-heading heading)
     (majutsu-log--apply-line-prefix-span start (point) prefix)))
 
+(defun majutsu-log--end-markers-at (section position)
+  "Return SECTION and ancestor end markers at POSITION."
+  (let (markers)
+    (while section
+      (let ((end (oref section end)))
+        (when (and (markerp end) (= (marker-position end) position))
+          (push end markers)))
+      (setq section (oref section parent)))
+    markers))
+
 (defun majutsu-log--commit-section-at-point ()
   "Return the enclosing `jj-commit' section at point."
   (let ((section (magit-current-section)))
@@ -1763,7 +1773,8 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
     (when lines
       (save-excursion
         (goto-char (oref commit-section end))
-        (let ((beg (point)))
+        (let ((beg (point))
+              (end-markers (majutsu-log--end-markers-at commit-section (point))))
           (magit-insert-section (changed-files rev)
             (majutsu-log--insert-prefixed-heading "Changed files" prefix)
             (dolist (line lines)
@@ -1779,7 +1790,8 @@ This function is meant to be used as a WASHER for `majutsu-jj-wash'."
             (if (markerp (oref commit-section content))
                 (set-marker (oref commit-section content) beg)
               (oset commit-section content (copy-marker beg))))
-          (set-marker (oref commit-section end) (point)))))
+          (dolist (marker end-markers)
+            (set-marker marker (point))))))
     (majutsu-log--change-files-section commit-section)))
 
 (defun majutsu-log-toggle-change-files ()
@@ -1822,6 +1834,15 @@ Runs `jj diff --git' for the file and inserts hunks as children."
                                         (not (looking-at-p "^@@ ")))
                               (forward-line 1))
                             (buffer-substring-no-properties beg (point)))))
+                ;; The insertion point is at the file section boundary.  Keep
+                ;; the file heading's display prefix on loaded diff lines
+                ;; instead of inheriting an unrelated neighboring line.
+                (line-prefix (get-text-property (oref section start)
+                                                 'line-prefix))
+                (wrap-prefix (get-text-property (oref section start)
+                                                 'wrap-prefix))
+                (end-markers (majutsu-log--end-markers-at
+                              section (oref section end)))
                 (before (length (oref section children)))
                 (inhibit-read-only t)
                 (magit-insert-section--parent section)
@@ -1843,11 +1864,16 @@ Runs `jj diff --git' for the file and inserts hunks as children."
                     (majutsu-diff-wash-hunk file)))
                 (if (= before (length (oref section children)))
                     (delete-region beg (point))
+                  (add-text-properties
+                   beg (point)
+                   (list 'line-prefix (or line-prefix "")
+                         'wrap-prefix (or wrap-prefix line-prefix "")))
                   (oset section header header)
                   (if (markerp (oref section content))
                       (set-marker (oref section content) beg)
                     (oset section content (copy-marker beg)))
-                  (set-marker (oref section end) (point)))))
+                  (dolist (marker end-markers)
+                    (set-marker marker (point))))))
             (> (length (oref section children)) before)))))))
 
 (defun majutsu-file-toggle-diff ()
@@ -2090,6 +2116,12 @@ When LOCKED is non-nil, avoid reusing existing unlocked log buffers."
         (majutsu-log-goto-@)))
     (current-buffer)))
 
+(defun majutsu-log--invocation-directory ()
+  "Return the directory represented by the current buffer."
+  (or (and (derived-mode-p 'dired-mode)
+           (dired-current-directory))
+      default-directory))
+
 ;;;###autoload
 (defun majutsu-log (&optional directory)
   "Open the majutsu log buffer.
@@ -2098,12 +2130,15 @@ If the current directory isn't located within a jj repository, then
 prompt for a directory.  If that directory isn't a repository either,
 offer to create one using `jj git init`."
   (interactive
-   (list (and (or current-prefix-arg (not (majutsu-toplevel)))
-              (file-name-as-directory
-               (expand-file-name
-                (read-directory-name "Repository or directory: "
-                                     nil nil nil))))))
-  (let* ((default-directory (or directory default-directory))
+   (let ((default-directory (majutsu-log--invocation-directory)))
+     (list (and (or current-prefix-arg (not (majutsu-toplevel)))
+                (or (and (not current-prefix-arg)
+                         (locate-dominating-file default-directory ".git"))
+                    (file-name-as-directory
+                     (expand-file-name
+                      (read-directory-name "Repository or directory: "
+                                           nil nil nil))))))))
+  (let* ((default-directory (or directory (majutsu-log--invocation-directory)))
          (topdir (majutsu-toplevel default-directory)))
     (cond
      (topdir

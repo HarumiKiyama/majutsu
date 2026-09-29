@@ -68,22 +68,37 @@ In diff buffer on a file section, restore only that file."
       (when (yes-or-no-p "Discard all working copy changes? ")
         (majutsu-run-jj "restore")))))
 
+(defun majutsu-restore--file-change-revision (section)
+  "Return the change revision for a log file SECTION, or nil."
+  (let ((parent (oref section parent)))
+    (when (and parent (eq (oref parent type) 'changed-files))
+      (oref parent value))))
+
 ;;;###autoload
 (defun majutsu-restore-file-at-point ()
   "Restore (discard) changes to the file at point or active file region.
 Point or region must select `jj-file' sections."
   (interactive)
   (let* ((sections (majutsu-file-sections-at-point-or-region))
+         (revisions (delete-dups
+                     (mapcar #'majutsu-restore--file-change-revision sections)))
+         (revision (car revisions))
          (filesets (mapcar #'majutsu-file-section-fileset sections))
          (count (length filesets))
          (prompt (if (= count 1)
-                     (format "Discard changes to %s? " (oref (car sections) value))
-                   (format "Discard changes to %d files? " count))))
+                     (format "Discard changes to %s%s? "
+                             (oref (car sections) value)
+                             (if revision (format " in %s" revision) ""))
+                   (format "Discard changes to %d files%s? "
+                           count (if revision (format " in %s" revision) "")))))
     (unless filesets
       (user-error "No file at point"))
+    (when (cdr revisions)
+      (user-error "Cannot discard files from different changesets together"))
     (when (yes-or-no-p prompt)
       (apply #'majutsu-run-jj
              (append (list "restore")
+                     (when revision (list (concat "--changes-in=" revision)))
                      (if (= count 1)
                          filesets
                        (cons "--" filesets))))
@@ -106,6 +121,10 @@ Point must be on a `jj-hunk' section."
   (let* ((hunk-section (magit-current-section))
          (file-section (and hunk-section (oref hunk-section parent)))
          (fileset (and file-section (majutsu-file-section-fileset file-section)))
+         (revision (and file-section
+                        (majutsu-restore--file-change-revision file-section)))
+         (args (append (when revision (list (concat "--changes-in=" revision)))
+                       (list fileset)))
          (hunk-patch (and hunk-section
                           (majutsu-interactive--build-hunk-patch
                            hunk-section :all nil nil))))
@@ -114,8 +133,8 @@ Point must be on a `jj-hunk' section."
     (when (yes-or-no-p "Discard this hunk? ")
       (if-let* ((patch (majutsu-restore--hunk-discard-patch hunk-section)))
           (majutsu-interactive-run-with-patch
-           "restore" (list fileset) patch)
-        (majutsu-run-jj "restore" fileset)))))
+           "restore" args patch)
+        (apply #'majutsu-run-jj "restore" args)))))
 
 (defun majutsu-restore-execute (args)
   "Execute jj restore with ARGS from the transient."

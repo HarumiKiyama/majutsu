@@ -16,8 +16,70 @@
 ;;; Code:
 
 (require 'ert)
+(require 'dired)
 (require 'majutsu-log)
 (require 'majutsu-section)
+
+(ert-deftest majutsu-log-uses-nested-dired-directory ()
+  "Open the nested repository shown in Dired, including expanded subdirectories."
+  (skip-unless (executable-find "jj"))
+  (let* ((parent (make-temp-file "majutsu-nested-" t))
+         (child (expand-file-name "B" parent))
+         (parent-buffer nil)
+         (child-buffer nil)
+         opened)
+    (unwind-protect
+        (progn
+          (make-directory child)
+          (should (zerop (call-process "jj" nil nil nil "git" "init" parent)))
+          (should (zerop (call-process "jj" nil nil nil "git" "init" child)))
+          (setq parent-buffer (dired parent))
+          (with-current-buffer parent-buffer
+            (dired-goto-file child)
+            (dired-maybe-insert-subdir child)
+            (goto-char (point-max))
+            (forward-line -1)
+            (should (equal (dired-current-directory)
+                           (file-name-as-directory child)))
+            (cl-letf (((symbol-function 'majutsu-log-setup-buffer)
+                       (lambda (&rest _) (setq opened default-directory))))
+              (call-interactively #'majutsu-log))
+            (should (file-equal-p opened child)))
+          (setq child-buffer (dired child))
+          (with-current-buffer child-buffer
+            (setq opened nil)
+            (cl-letf (((symbol-function 'majutsu-log-setup-buffer)
+                       (lambda (&rest _) (setq opened default-directory))))
+              (call-interactively #'majutsu-log))
+            (should (file-equal-p opened child))))
+      (when (buffer-live-p child-buffer) (kill-buffer child-buffer))
+      (when (buffer-live-p parent-buffer) (kill-buffer parent-buffer))
+      (delete-directory parent t))))
+
+(ert-deftest majutsu-log-offers-to-initialize-nested-git-repository ()
+  "Prompt for JJ initialization in a Git-only child of a JJ workspace."
+  (skip-unless (executable-find "jj"))
+  (let* ((parent (make-temp-file "majutsu-nested-git-" t))
+         (child (expand-file-name "B" parent))
+         (dired-buffer nil)
+         prompt)
+    (unwind-protect
+        (progn
+          (make-directory child)
+          (should (zerop (call-process "jj" nil nil nil "git" "init" parent)))
+          (with-temp-file (expand-file-name ".git" child)
+            (insert "gitdir: ../.git/modules/B\n"))
+          (setq dired-buffer (dired child))
+          (with-current-buffer dired-buffer
+            (cl-letf (((symbol-function 'read-directory-name)
+                       (lambda (&rest _) (ert-fail "Unexpected directory prompt")))
+                      ((symbol-function 'y-or-n-p)
+                       (lambda (question) (setq prompt question) nil)))
+              (should-error (call-interactively #'majutsu-log)
+                            :type 'user-error))
+            (should (string-match-p (regexp-quote child) prompt))))
+      (when (buffer-live-p dired-buffer) (kill-buffer dired-buffer))
+      (delete-directory parent t))))
 
 (defun majutsu-log-test--base-compiled ()
   "Return a compact compiled layout for parser tests."
@@ -792,6 +854,16 @@
   (should (transient-get-suffix 'majutsu-dispatch "w"))
   (should-not (lookup-key majutsu-log-mode-map (kbd "w"))))
 
+(ert-deftest majutsu-mode-map-binds-tags-directly ()
+  "The main Majutsu mode should open the tag transient with `t'."
+  (should (eq (lookup-key majutsu-mode-map (kbd "t")) #'majutsu-tag)))
+
+(ert-deftest majutsu-mode-map-binds-edit-and-ediff-directly ()
+  "The main Majutsu mode should expose documented direct commands."
+  (should (eq (lookup-key majutsu-mode-map (kbd "e"))
+              #'majutsu-edit-changeset))
+  (should (eq (lookup-key majutsu-mode-map (kbd "E")) #'majutsu-ediff)))
+
 (ert-deftest majutsu-log-wash-logs-streams-and-caches-entries ()
   "Washing should transform the buffer incrementally and cache entries."
   (let* ((compiled (majutsu-log-test--tail-compiled))
@@ -1209,6 +1281,29 @@
         (should (= calls 1))
         (should-not (oref files-section hidden))))))
 
+(ert-deftest majutsu-log-toggle-change-files-extends-last-change-ancestors ()
+  "F on the final change should extend the containing log section."
+  (with-temp-buffer
+    (majutsu-log-mode)
+    (setq buffer-read-only nil)
+    (let ((compiled (majutsu-log-test--base-compiled)))
+      (cl-letf (((symbol-function 'majutsu-jj-insert)
+                 (lambda (&rest _args)
+                   (insert "M src/a.el\n")
+                   0)))
+        (magit-insert-section (lograph)
+          (majutsu-log--insert-entry
+           (list :id "change-a"
+                 :columns '((change-id . "change-a")
+                             (description . "Add file"))
+                 :heading-prefixes '("○ "))
+           compiled))
+        (goto-char (point-min))
+        (let ((commit (car (oref magit-root-section children))))
+          (majutsu-log-toggle-change-files)
+          (should (= (marker-position (oref magit-root-section end))
+                     (marker-position (oref commit end)))))))))
+
 (ert-deftest majutsu-log-toggle-change-files-indents-inline-change-files ()
   "F on a graph log commit should keep changed files under the commit indent."
   (with-temp-buffer
@@ -1225,28 +1320,39 @@
                    "-old"
                    "+new")
                  "\n"))
-          files-section file-section)
+          files-section file-section next-section)
       (cl-letf (((symbol-function 'majutsu--jj-insert)
                  (lambda (_return-error &rest args)
                    (should (equal args '("diff" "--summary" "--revisions=change-a")))
-                   (insert "M src/a.el\n")
+                   (insert "M src/a.el\nA src/b.el\n")
                    0))
                 ((symbol-function 'majutsu-jj-insert)
                  (lambda (&rest args)
                    (pcase args
                      ('("diff" "--summary" "--revisions=change-a")
-                      (insert "M src/a.el\n"))
+                      (insert "M src/a.el\nA src/b.el\n"))
                      ('("diff" "--git" "--revisions=change-a" "--" "src/a.el")
                       (insert diff))
+                     ('("diff" "--git" "--revisions=change-a" "--" "src/b.el")
+                      (insert (replace-regexp-in-string "src/a.el" "src/b.el" diff)))
                      (_ (ert-fail (format "Unexpected jj args: %S" args))))
                    0)))
-        (majutsu-log--insert-entry
-         (list :id "change-a"
-               :columns '((change-id . "change-a")
-                           (description . "Add files"))
-               :heading-prefixes '("○ "))
-         compiled)
+        (magit-insert-section (lograph)
+          (majutsu-log--insert-entry
+           (list :id "change-a"
+                 :columns '((change-id . "change-a")
+                             (description . "Add files"))
+                 :heading-prefixes '("○ "))
+           compiled)
+          (majutsu-log--insert-entry
+           (list :id "change-b"
+                 :columns '((change-id . "change-b")
+                             (description . "Next change"))
+                 :heading-prefixes '("│ ○ "))
+           compiled))
         (goto-char (point-min))
+        (search-forward "change-a")
+        (beginning-of-line)
         (majutsu-log-toggle-change-files)
         (setq files-section
               (seq-find (lambda (child)
@@ -1254,6 +1360,7 @@
                         (oref (magit-current-section) children)))
         (should files-section)
         (setq file-section (car (oref files-section children)))
+        (setq next-section (cadr (oref magit-root-section children)))
         (let ((changed-prefix
                (get-text-property (oref files-section start) 'line-prefix))
               (file-prefix
@@ -1266,6 +1373,38 @@
         (should (equal (substring-no-properties
                         (get-text-property (oref file-section start) 'line-prefix))
                        "  "))
+        (let ((hunk-section (car (oref file-section children))))
+          (should (eq (oref hunk-section type) 'jj-hunk))
+          (should (equal (substring-no-properties
+                          (get-text-property (oref hunk-section start)
+                                             'line-prefix))
+                         "  ")))
+        (should (equal (substring-no-properties
+                        (get-text-property (oref next-section start) 'line-prefix))
+                       "│ ○ "))
+        (let ((second-file (cadr (oref files-section children))))
+          (goto-char (oref second-file start))
+          (majutsu-file-toggle-diff)
+          (should (oref second-file children))
+          (should (= (marker-position (oref files-section end))
+                     (marker-position (oref second-file end))))
+          (should (= (marker-position (oref (oref files-section parent) end))
+                     (marker-position (oref second-file end))))
+          (save-excursion
+            (goto-char (oref (car (oref second-file children)) start))
+            (while (< (point) (oref second-file end))
+              (should (equal (substring-no-properties
+                              (get-text-property (point) 'line-prefix))
+                             "  "))
+              (forward-line 1))))
+        (should (equal (substring-no-properties
+                        (get-text-property (oref next-section start) 'line-prefix))
+                       "│ ○ "))
+        (goto-char (oref (oref files-section parent) start))
+        (majutsu-log-toggle-change-files)
+        (should (oref files-section hidden))
+        (majutsu-log-toggle-change-files)
+        (should-not (oref files-section hidden))
         (goto-char (oref file-section start))
         (majutsu-file-toggle-diff)
         (should (oref file-section hidden))

@@ -24,6 +24,9 @@
 (declare-function majutsu-marginalia-prewarm-candidate-data
                   "majutsu-marginalia"
                   (category payload &optional revset directory))
+(declare-function majutsu-git--remote-names "majutsu-git" (&optional directory))
+(declare-function majutsu-git--start "majutsu-git"
+                  (args &optional success-msg finish-callback))
 
 (defvar-local majutsu-tag--list-all-remotes nil
   "Non-nil when the tag list includes remote tags.")
@@ -187,10 +190,28 @@ This is a convenience wrapper around `jj tag set --allow-move'."
      (list names revision)))
   (majutsu-tag-set names revision t))
 
+;;;###autoload
+(defun majutsu-tag-push (names remote)
+  "Push local tag NAMES to Git REMOTE.
+Each tag is passed as a separate `--tag' option to `jj git push'."
+  (interactive
+   (let* ((names (majutsu-tag--read-names "Push tag(s)"))
+          (remotes (or (ignore-errors (majutsu-git--remote-names))
+                       '("origin")))
+          (remote (majutsu-completing-read "Push to remote" remotes nil t nil nil
+                                           "origin")))
+     (list names remote)))
+  (when (and names remote (not (string-empty-p remote)))
+    (majutsu--message-with-log "Pushing tag(s) to %s..." remote)
+    (majutsu-git--start
+     (append (list "push" "--remote" remote)
+             (apply #'append (mapcar (lambda (name) (list "--tag" name)) names)))
+     (format "Pushed tag(s) to %s" remote))))
+
 ;;;###autoload(autoload 'majutsu-tag "majutsu-tag" nil t)
 (transient-define-prefix majutsu-tag ()
   "Internal transient for jj tag operations."
-  :transient-non-suffix t
+  :transient-non-suffix 'transient--do-warn
   ["Tag Operations"
    [
     ("l" "List tags" majutsu-tag-list
@@ -203,6 +224,9 @@ This is a convenience wrapper around `jj tag set --allow-move'."
    [
     ("d" "Delete tag(s)" majutsu-tag-delete
      :description "Delete tag(s)")]
+   [
+    ("p" "Push tag(s)" majutsu-tag-push
+     :description "Push tags to a Git remote")]
    [("q" "Quit" transient-quit-one)]])
 
 ;;; _

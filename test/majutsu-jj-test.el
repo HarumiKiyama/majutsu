@@ -259,9 +259,28 @@
               ((symbol-function 'process-file)
                (lambda (_program _infile _destination _display &rest _args)
                  (insert "/home/demo/repo\n")
-                 0)))
+                 0))
+              ((symbol-function 'locate-dominating-file)
+               (lambda (&rest _) nil)))
       (should (equal (majutsu-toplevel)
                      "/ssh:demo:/home/demo/repo/")))))
+
+(ert-deftest majutsu-toplevel/stops-at-nested-git-repository ()
+  "Do not use an outer JJ workspace inside a Git-only submodule."
+  (let* ((outer (make-temp-file "majutsu-outer-" t))
+         (inner (expand-file-name "inner" outer))
+         (default-directory (file-name-as-directory inner)))
+    (unwind-protect
+        (progn
+          (make-directory inner)
+          (with-temp-file (expand-file-name ".git" inner)
+            (insert "gitdir: ../.git/modules/inner\n"))
+          (cl-letf (((symbol-function 'majutsu-process-file)
+                     (lambda (_program _infile _destination _display &rest _args)
+                       (insert outer "\n")
+                       0)))
+            (should-not (majutsu-toplevel))))
+      (delete-directory outer t))))
 
 (ert-deftest majutsu--assert-usable-jj/uses-remote-aware-executable-find ()
   "Remote executable assertion should use `executable-find' with REMOTE.

@@ -12,6 +12,11 @@
 (require 'cl-lib)
 (require 'majutsu-tag)
 
+(ert-deftest majutsu-tag-unbound-key-warns-instead-of-running-mode-command ()
+  "Unlisted keys in the tag transient should report an unbound suffix."
+  (should (eq (oref (get 'majutsu-tag 'transient--prefix) transient-non-suffix)
+              'transient--do-warn)))
+
 (ert-deftest majutsu-tag-get-tag-names/local-args ()
   (let (seen-args)
     (cl-letf (((symbol-function 'majutsu-jj-lines)
@@ -104,6 +109,18 @@
       (majutsu-tag-delete '("v1.*" "release"))
       (should (equal called
                      '("tag" "delete" "v1.*" "release"))))))
+
+(ert-deftest majutsu-tag-push/dispatches-tag-options-and-remote ()
+  (let (called)
+    (cl-letf (((symbol-function 'majutsu-git--start)
+               (lambda (args &optional _success-msg _finish-callback)
+                 (setq called args)))
+              ((symbol-function 'majutsu--message-with-log)
+               (lambda (&rest _args) nil)))
+      (majutsu-tag-push '("v1.0" "release") "origin")
+      (should (equal called
+                     '("push" "--remote" "origin"
+                       "--tag" "v1.0" "--tag" "release"))))))
 
 (provide 'majutsu-tag-test)
 ;;; majutsu-tag-test.el ends here

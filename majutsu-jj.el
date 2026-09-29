@@ -500,7 +500,9 @@ programmatically (paths, IDs, names, etc.)."
   "Return the workspace root for DIRECTORY or `default-directory'.
 
 This runs `jj workspace root' and returns a directory name (with a
-trailing slash) or nil if not inside a JJ workspace."
+trailing slash) or nil if not inside a JJ workspace.  A nested Git
+repository without its own JJ workspace does not belong to the outer
+JJ workspace."
   (majutsu--with-safe-default-directory directory
     (majutsu--with-no-color
       (let* ((args (majutsu-process-jj-arguments '("workspace" "root"))))
@@ -511,7 +513,14 @@ trailing slash) or nil if not inside a JJ workspace."
             (when (zerop exit)
               (let ((out (string-trim (buffer-string))))
                 (unless (string-empty-p out)
-                  (majutsu-jj-expand-directory-from-jj out default-directory))))))))))
+                  (let* ((root (majutsu-jj-expand-directory-from-jj
+                                out default-directory))
+                         (git-root (locate-dominating-file
+                                    default-directory ".git")))
+                    (unless (and git-root
+                                 (file-in-directory-p git-root root)
+                                 (not (file-equal-p git-root root)))
+                      root)))))))))))
 
 (defun majutsu--toplevel-safe (&optional directory)
   "Return the workspace root for DIRECTORY or signal an error."

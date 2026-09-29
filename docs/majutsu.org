@@ -160,6 +160,7 @@ Each revision in the log is a section. The visible anchor line is built from fie
 
 - Key: F (majutsu-log-toggle-change-files) :: Toggle an inline list of files changed by the revision at point.
 - Key: TAB on a changed file :: Load and toggle that file's inline diff hunks for the parent revision.
+- Key: k on a changed file or hunk :: Discard that change's file or hunk changes. On working-copy status files, discard working-copy changes.
 
 *** Log Options Transient
 - Key: l (majutsu-log-transient) ::
@@ -675,13 +676,12 @@ Majutsu wraps =jj tag set/list/delete= and follows jj semantics where creating a
 moving tags both use =tag set= (moving requires =--allow-move=).
 
 ** Tag Transient
-Tag commands are intentionally dispatch-first.
-
-- Key: ? t (majutsu-tag) :: Open the tag transient.
+- Key: t (majutsu-tag) :: Open the tag transient.
 - Key: l (majutsu-tag-list) :: List tags in a dedicated buffer.
 - Key: s (majutsu-tag-set) :: Set tag(s). Uses completion and allows new names.
 - Key: m (majutsu-tag-move) :: Move existing tag(s) to another revision (internally =--allow-move=).
 - Key: d (majutsu-tag-delete) :: Delete tag(s) by name or pattern.
+- Key: p (majutsu-tag-push) :: Push selected tag(s) to a Git remote.
 
 Tag prompts use completion candidates from local tags. Existing tags are shown for
 selection, while set/delete prompts still allow entering string patterns manually.

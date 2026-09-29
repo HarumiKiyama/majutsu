@@ -68,6 +68,9 @@ afterward."
   "$"   'majutsu-process-buffer
   "l"   'majutsu-log-transient
   "?"   'majutsu-dispatch
+  "t"   'majutsu-tag
+  "e"   'majutsu-edit-changeset
+  "E"   'majutsu-ediff
   "c"   'majutsu-describe
   "C"   'majutsu-commit
   "o"   'majutsu-new
