@@ -367,7 +367,7 @@ ARG may be a process object or an exit code.  Return the exit code."
       (let* ((msg (majutsu--process-error-summary process-buf section))
              (usage (majutsu--process--error-usage process-buf))
              (root default-dir))
-        (when-let* ((log-buf (and root (majutsu--find-mode-buffer 'majutsu-log-mode root))))
+        (dolist (log-buf (and root (majutsu--find-mode-buffers 'majutsu-log-mode root)))
           (with-current-buffer log-buf
             (setq-local majutsu-log--this-error (or msg "Command failed"))))
         (message "jj error: %s%s"
@@ -537,7 +537,7 @@ Return non-nil when LINE is consumed as a control packet."
               (let ((default-directory (or default-dir default-directory)))
                 (majutsu-refresh)))
           (when (and default-dir (fboundp 'majutsu-log-refresh))
-            (when-let* ((buffer (majutsu--find-mode-buffer 'majutsu-log-mode default-dir)))
+            (dolist (buffer (majutsu--find-mode-buffers 'majutsu-log-mode default-dir))
               (with-current-buffer buffer
                 (ignore-errors (majutsu-log-refresh))))))))))
 

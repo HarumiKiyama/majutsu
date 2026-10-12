@@ -523,12 +523,11 @@ Refresh the current buffer if its major mode derives from
         (if (called-interactively-p 'interactive)
             (majutsu-refresh-buffer)
           (ignore-errors (majutsu-refresh-buffer))))
-      (when (and root
-                 (not (derived-mode-p 'majutsu-log-mode))
-                 (fboundp 'majutsu-log-refresh))
-        (when-let* ((buffer (majutsu--find-mode-buffer 'majutsu-log-mode root)))
-          (with-current-buffer buffer
-            (ignore-errors (majutsu-log-refresh))))))))
+      (when (and root (fboundp 'majutsu-log-refresh))
+        (dolist (buffer (majutsu--find-mode-buffers 'majutsu-log-mode root))
+          (unless (eq buffer (current-buffer))
+            (with-current-buffer buffer
+              (ignore-errors (majutsu-log-refresh)))))))))
 
 (defun majutsu-hack-dir-local-variables ()
   "Like `hack-dir-local-variables-non-file-buffer' but ignore some variables.

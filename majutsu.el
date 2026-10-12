@@ -50,6 +50,7 @@ Instead of invoking this alias for `majutsu-log' using
     ("E" "Ediff"             majutsu-ediff)]
    [("G" "Git"               majutsu-git-transient)
     ("l" "Log options"       majutsu-log-transient)
+    ("L" "Log all"           majutsu-log-all)
     ("o" "New"               majutsu-new)
     ("O" "New (dwim)"        majutsu-new-dwim)
     ("r" "Rebase"            majutsu-rebase)

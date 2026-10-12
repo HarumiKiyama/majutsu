@@ -107,6 +107,7 @@ If KEYMAP is not yet bound, defer binding until it becomes available."
              (fboundp 'evil-set-initial-state))
     (dolist (mode '(majutsu-mode
                     majutsu-log-mode
+                    majutsu-log-all-mode
                     majutsu-op-log-mode
                     majutsu-diff-mode))
       (evil-set-initial-state mode majutsu-evil-initial-state))))

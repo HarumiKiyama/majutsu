@@ -434,6 +434,16 @@ of the selected frame."
                            (equal (majutsu--buffer-root buf) root)))))
               (buffer-list))))
 
+(defun majutsu--find-mode-buffers (mode &optional root)
+  "Return all live buffers in MODE for ROOT (or any repo when ROOT is nil)."
+  (let ((root (or root (majutsu--buffer-root))))
+    (seq-filter (lambda (buf)
+                  (with-current-buffer buf
+                    (and (derived-mode-p mode)
+                         (or (null root)
+                             (equal (majutsu--buffer-root buf) root)))))
+                (buffer-list))))
+
 (defun majutsu--resolve-mode-buffer (mode &optional root)
   "Prefer the current buffer if it is in MODE; otherwise find one for ROOT."
   (if (derived-mode-p mode)

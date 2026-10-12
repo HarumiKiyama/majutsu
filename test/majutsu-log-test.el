@@ -1510,4 +1510,61 @@
       (let ((file (majutsu-file-at-point)))
         (should (equal file "test/file.el"))))))
 
+(ert-deftest majutsu-log-all-mode-derives-from-log-mode ()
+  "The log-only buffer should reuse log commands and refresh plumbing."
+  (with-temp-buffer
+    (majutsu-log-all-mode)
+    (should (derived-mode-p 'majutsu-log-mode))
+    (should (eq (majutsu-log--current-mode) 'majutsu-log-all-mode))
+    (should (functionp (majutsu--refresh-buffer-function)))))
+
+(ert-deftest majutsu-log-all-refresh-buffer-only-runs-log-sections ()
+  "Refreshing a log-only buffer skips status and workspace sections."
+  (with-temp-buffer
+    (majutsu-log-all-mode)
+    (let ((inhibit-read-only t)
+          (majutsu-log-all-sections-hook
+           (list (lambda () (insert "LOG\n"))))
+          (majutsu-log-sections-hook
+           (list (lambda () (insert "STATUS\n")))))
+      (cl-letf (((symbol-function 'majutsu-selection-render) #'ignore))
+        (majutsu-log-all-refresh-buffer))
+      (should (equal (buffer-string) "LOG\n")))))
+
+(ert-deftest majutsu-log-all-build-args-uses-own-mode-values ()
+  "Log-only buffers read revsets from their own buffer-local values."
+  (with-temp-buffer
+    (majutsu-log-all-mode)
+    (setq-local majutsu-buffer-log-args '("--limit=5"))
+    (setq-local majutsu-buffer-log-revsets "all()")
+    (setq-local majutsu-buffer-log-filesets nil)
+    (let ((majutsu-direct-use-buffer-arguments 'current)
+          (cmd (cl-letf (((symbol-function 'majutsu-log--ensure-template)
+                          (lambda () '(:template "TPL"))))
+                 (majutsu-log--build-args))))
+      (should (equal cmd '("log" "--limit=5" "-r" "all()" "-T" "TPL"))))))
+
+(ert-deftest majutsu-log-all-default-revsets-property ()
+  "The defcustom seeds the default revset for the log-only mode."
+  (should (equal (get 'majutsu-log-all-mode 'majutsu-log-default-revsets)
+                 majutsu-log-all-default-revsets))
+  (should-not (get 'majutsu-log-mode 'majutsu-log-default-revsets)))
+
+(ert-deftest majutsu-find-mode-buffers-returns-every-log-buffer ()
+  "Refresh helpers should see both log and log-only buffers for a repo."
+  (let ((a (generate-new-buffer " *log-a*"))
+        (b (generate-new-buffer " *log-b*")))
+    (unwind-protect
+        (progn
+          (dolist (buf (list a b))
+            (with-current-buffer buf
+              (setq majutsu--default-directory "/tmp/repo/")))
+          (with-current-buffer a (majutsu-log-mode))
+          (with-current-buffer b (majutsu-log-all-mode))
+          (let ((found (majutsu--find-mode-buffers 'majutsu-log-mode "/tmp/repo/")))
+            (should (memq a found))
+            (should (memq b found))))
+      (kill-buffer a)
+      (kill-buffer b))))
+
 ;;; majutsu-log-test.el ends here

@@ -39,6 +39,14 @@
 
 ;;; Log State
 
+(defun majutsu-log--current-mode ()
+  "Return the log mode whose arguments apply to the current buffer.
+This is `major-mode' in buffers derived from `majutsu-log-mode',
+otherwise `majutsu-log-mode'."
+  (if (derived-mode-p 'majutsu-log-mode)
+      major-mode
+    'majutsu-log-mode))
+
 (defun majutsu-log--get-value (mode &optional use-buffer-args)
   "Get log arguments for MODE.
 
@@ -152,7 +160,7 @@ When TAKES-VALUE is non-nil, also remove the following element."
 (defun majutsu-log--summary-parts ()
   "Return a list of human-readable fragments describing current log buffer."
   (pcase-let* ((`(,args ,revsets ,filesets)
-                (majutsu-log--get-value 'majutsu-log-mode 'current))
+                (majutsu-log--get-value (majutsu-log--current-mode) 'current))
                (parts '()))
     (when revsets
       (push (format "rev=%s" revsets) parts))
@@ -617,7 +625,7 @@ Returns a plist with :template, :columns, and :module-columns."
 (defun majutsu-log--build-args ()
   "Build argument list for `jj log' using current log variables."
   (pcase-let ((`(,args ,revsets ,filesets)
-               (majutsu-log--get-value 'majutsu-log-mode 'current)))
+               (majutsu-log--get-value (majutsu-log--current-mode) 'current)))
     (let ((cmd '("log")))
       (setq cmd (append cmd args))
       (when revsets
@@ -2067,19 +2075,20 @@ Return non-nil when the section could be located."
         majutsu-buffer-log-revsets
         majutsu-buffer-log-filesets))
 
-(defun majutsu-log-render ()
-  "Render the log buffer using cached data."
+(defun majutsu-log-render (&optional hook)
+  "Render the log buffer using cached data.
+Run HOOK (default `majutsu-log-sections-hook') to insert sections."
   (magit-insert-section (logbuf)
-    (run-hooks 'majutsu-log-sections-hook)
+    (run-hooks (or hook 'majutsu-log-sections-hook))
     (majutsu-selection-render)))
 
-(defun majutsu-log-refresh-buffer ()
-  "Refresh the current Majutsu log buffer."
+(defun majutsu-log-refresh-buffer (&optional hook)
+  "Refresh the current Majutsu log buffer using sections HOOK."
   (majutsu--assert-mode 'majutsu-log-mode)
   (setq majutsu-log--cached-entries nil)
   (setq majutsu-log--entry-by-id nil)
   (setq majutsu-log--children-by-id nil)
-  (majutsu-log-render))
+  (majutsu-log-render hook))
 
 ;;;###autoload
 (defun majutsu-log-refresh ()
@@ -2169,16 +2178,73 @@ offer to create one using `jj git init`."
      (t
       (user-error "Abort")))))
 
+;;; Log All
+
+(defcustom majutsu-log-all-sections-hook
+  (list #'majutsu-log-insert-error-header
+        #'majutsu-log-insert-logs)
+  "Hook run to insert sections in the `majutsu-log-all-mode' buffer."
+  :type 'hook
+  :group 'majutsu)
+
+(defcustom majutsu-log-all-default-revsets "all()"
+  "Default revset for `majutsu-log-all' buffers.
+The log transient can override this per session; nil uses jj's
+configured default revset."
+  :type '(choice (const :tag "jj default" nil) string)
+  :group 'majutsu
+  :set (lambda (symbol value)
+         (set-default-toplevel-value symbol value)
+         (put 'majutsu-log-all-mode 'majutsu-log-default-revsets value)))
+
+(define-derived-mode majutsu-log-all-mode majutsu-log-mode "Majutsu Log All"
+  "Major mode for a log-only view of a jj repository.
+It shares `majutsu-log-mode' commands, but only renders the
+sections in `majutsu-log-all-sections-hook' and keeps its own log
+arguments."
+  :group 'majutsu)
+
+(defun majutsu-log-all-refresh-buffer ()
+  "Refresh the current `majutsu-log-all-mode' buffer."
+  (majutsu--assert-mode 'majutsu-log-all-mode)
+  (majutsu-log-refresh-buffer 'majutsu-log-all-sections-hook))
+
+;;;###autoload
+(defun majutsu-log-all (&optional directory)
+  "Open a buffer showing only the jj log graph for DIRECTORY.
+Unlike `majutsu-log', this buffer omits working copy status and
+workspaces, and defaults to `majutsu-log-all-default-revsets'."
+  (interactive
+   (list (and current-prefix-arg
+              (read-directory-name "Repository: " nil nil t))))
+  (let* ((default-directory (or directory (majutsu-log--invocation-directory)))
+         (topdir (or (majutsu-toplevel default-directory)
+                     (user-error "Not inside a jj repository: %s"
+                                 (abbreviate-file-name default-directory))))
+         (default-directory topdir)
+         (commit (and (derived-mode-p 'majutsu-mode)
+                      (majutsu-revision-at-point))))
+    (pcase-let ((`(,args ,revsets ,filesets)
+                 (majutsu-log--get-value 'majutsu-log-all-mode 'direct)))
+      (with-current-buffer
+          (majutsu-setup-buffer #'majutsu-log-all-mode nil
+            (majutsu-buffer-log-args (copy-sequence args))
+            (majutsu-buffer-log-revsets revsets)
+            (majutsu-buffer-log-filesets (copy-sequence filesets)))
+        (unless (and commit (majutsu--goto-log-entry commit))
+          (majutsu-log-goto-@))
+        (current-buffer)))))
+
 ;;; Commands
 
 (defun majutsu-log-transient-set-revisions ()
   "Prompt for a revset and store it in the current log variables."
   (interactive)
-  (let* ((current (cadr (majutsu-log--get-value 'majutsu-log-mode 'direct)))
+  (let* ((current (cadr (majutsu-log--get-value (majutsu-log--current-mode) 'direct)))
          (input (string-trim (read-from-minibuffer "Revset (empty to clear): " current))))
     (pcase-let ((`(,args ,_revsets ,filesets)
-                 (majutsu-log--get-value 'majutsu-log-mode 'direct)))
-      (majutsu-log--set-value 'majutsu-log-mode args
+                 (majutsu-log--get-value (majutsu-log--current-mode) 'direct)))
+      (majutsu-log--set-value (majutsu-log--current-mode) args
                               (unless (string-empty-p input) input)
                               filesets))
     (majutsu-log-transient--redisplay)))
@@ -2187,21 +2253,21 @@ offer to create one using `jj git init`."
   "Clear the stored revset."
   (interactive)
   (pcase-let ((`(,args ,_revsets ,filesets)
-               (majutsu-log--get-value 'majutsu-log-mode 'direct)))
-    (majutsu-log--set-value 'majutsu-log-mode args nil filesets))
+               (majutsu-log--get-value (majutsu-log--current-mode) 'direct)))
+    (majutsu-log--set-value (majutsu-log--current-mode) args nil filesets))
   (majutsu-log-transient--redisplay))
 
 (defun majutsu-log-transient-reset ()
   "Reset log options to defaults."
   (interactive)
-  (majutsu-log--set-value 'majutsu-log-mode nil nil nil)
+  (majutsu-log--set-value (majutsu-log--current-mode) nil nil nil)
   (if (fboundp 'transient-reset)
       (transient-reset)
     (majutsu-log-transient--redisplay)))
 
 (defun majutsu-log--toggle-desc (label flag)
   "Return LABEL annotated with ON/OFF state for FLAG in log args."
-  (if (member flag (car (majutsu-log--get-value 'majutsu-log-mode 'direct)))
+  (if (member flag (car (majutsu-log--get-value (majutsu-log--current-mode) 'direct)))
       (format "%s [on]" label)
     (format "%s [off]" label)))
 
@@ -2235,12 +2301,12 @@ offer to create one using `jj git init`."
 
 (cl-defmethod transient-init-value ((obj majutsu-log-prefix))
   (pcase-let ((`(,args ,_revsets ,filesets)
-               (majutsu-log--get-value (oref obj major-mode) 'prefix)))
+               (majutsu-log--get-value (majutsu-log--current-mode) 'prefix)))
     (oset obj value (if filesets `(("--" ,@filesets) ,@args) args))))
 
 (cl-defmethod transient-set-value ((obj majutsu-log-prefix))
   (let* ((obj (oref obj prototype))
-         (mode (or (oref obj major-mode) major-mode)))
+         (mode (majutsu-log--current-mode)))
     (pcase-let ((`(,args ,files) (transient-args (oref obj command)))
                 (`(,_old-args ,revsets ,_filesets)
                  (majutsu-log--get-value mode 'direct)))
@@ -2250,7 +2316,7 @@ offer to create one using `jj git init`."
 
 (cl-defmethod transient-save-value ((obj majutsu-log-prefix))
   (let* ((obj (oref obj prototype))
-         (mode (or (oref obj major-mode) major-mode)))
+         (mode (majutsu-log--current-mode)))
     (pcase-let ((`(,args ,files) (transient-args (oref obj command)))
                 (`(,_old-args ,revsets ,_filesets)
                  (majutsu-log--get-value mode 'direct)))
@@ -2299,13 +2365,13 @@ offer to create one using `jj git init`."
      :description (lambda ()
                     (majutsu-log--value-desc
                      "Set revset"
-                     (cadr (majutsu-log--get-value 'majutsu-log-mode 'direct))))
+                     (cadr (majutsu-log--get-value (majutsu-log--current-mode) 'direct))))
      :transient t)
     (majutsu-log:--limit)
     (majutsu-log:--reversed)
     (majutsu-log:--no-graph)
     ("R" "Clear revset" majutsu-log-transient-clear-revisions
-     :if (lambda () (cadr (majutsu-log--get-value 'majutsu-log-mode 'direct)))
+     :if (lambda () (cadr (majutsu-log--get-value (majutsu-log--current-mode) 'direct)))
      :transient t)
     ]
    ["Paths"
